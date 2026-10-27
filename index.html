@@ -1,0 +1,1151 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f5a41">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rundlauf">
+<title>Rundlauf</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: Vollbildkarte, Planer als Seitenleiste (Desktop) bzw. Bottom-Sheet (Handy), Navigation als Banner oben + Leiste unten */
+:root{
+  --bg:#eef0ec; --panel:#fbfbf9; --ink:#1c2420; --muted:#5b665f; --line:#d8ddd6;
+  --forest:#1f5a41; --forest-ink:#ffffff; --blaze:#ff5a1f; --blaze-ink:#ffffff; --soft:#e6ebe4;
+  --danger:#c62828; --shadow:0 6px 24px rgba(20,30,25,.18);
+  --font-ui:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-num:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101512; --panel:#19211c; --ink:#e7ede8; --muted:#9aa89f; --line:#2c3730;
+  --forest:#5fb88d; --forest-ink:#0c1a13; --blaze:#ff7a45; --blaze-ink:#1a0c05; --soft:#222d26;
+  --danger:#ff6b6b; --shadow:0 6px 24px rgba(0,0,0,.5); color-scheme:dark}}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 var(--font-ui);overflow:hidden;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+#map{position:absolute;inset:0;z-index:0}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--blaze);outline-offset:2px}
+
+#panel{position:absolute;z-index:500;left:0;right:0;bottom:0;max-height:62%;background:var(--panel);
+  border-radius:18px 18px 0 0;box-shadow:var(--shadow);display:flex;flex-direction:column;
+  padding-bottom:env(safe-area-inset-bottom,0px)}
+#panel .grab{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px 8px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.brand{font:700 26px/1 var(--font-num);letter-spacing:.04em;text-transform:uppercase}
+.brand small{display:block;font:500 12px/1.3 var(--font-ui);letter-spacing:0;text-transform:none;color:var(--muted);margin-top:3px}
+#fold{border:1px solid var(--line);background:var(--soft);border-radius:999px;padding:6px 12px;font-weight:600}
+.pbody{overflow:auto;padding:4px 16px 14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+#panel.folded .pbody{display:none}
+.lbl{font:600 11px/1 var(--font-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--soft);border-radius:10px;padding:10px 14px;font-weight:600;min-height:44px}
+.btn:hover{border-color:var(--forest)}
+.btn.primary{background:var(--blaze);color:var(--blaze-ink);border-color:transparent}
+.btn.go{background:var(--forest);color:var(--forest-ink);border-color:transparent;width:100%;font-size:17px}
+.btn.on{background:var(--forest);color:var(--forest-ink);border-color:transparent}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:10px;min-width:48px;min-height:44px;padding:0 10px;font:600 21px/1 var(--font-num)}
+.chip[aria-pressed="true"]{background:var(--forest);color:var(--forest-ink);border-color:transparent}
+input[type=text],select{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px 12px;min-height:44px;min-width:0}
+input[type=text]{flex:1}
+input[type=range]{width:100%;accent-color:var(--blaze)}
+.kmbig{font:700 34px/1 var(--font-num)}
+.kmbig span{font-size:18px;color:var(--muted);margin-left:3px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--soft);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font:700 26px/1.05 var(--font-num)}
+.stat span{font-size:12px;color:var(--muted)}
+.hint{font-size:13px;color:var(--muted)}
+details summary{cursor:pointer;font-weight:600;min-height:32px}
+.field{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+
+#nav{position:absolute;z-index:600;inset:0;pointer-events:none}
+#banner{pointer-events:auto;position:absolute;left:0;right:0;top:0;background:var(--forest);color:var(--forest-ink);
+  padding:max(10px,env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 12px max(14px,env(safe-area-inset-left,0px));
+  display:flex;gap:14px;align-items:center;box-shadow:var(--shadow)}
+#banner svg{width:56px;height:56px;flex:none}
+#banner .dist{font:700 40px/1 var(--font-num)}
+#banner .what{font-size:17px;font-weight:600;line-height:1.2}
+#banner.off{background:var(--danger);color:#fff}
+#navbar{pointer-events:auto;position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;box-shadow:var(--shadow);
+  padding:14px max(16px,env(safe-area-inset-right,0px)) max(14px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.bar{height:8px;border-radius:99px;background:var(--soft);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--blaze);transition:width .6s}
+#recenter{pointer-events:auto;position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:190px;border-radius:999px;box-shadow:var(--shadow)}
+#toast{position:absolute;z-index:900;left:50%;top:max(14px,env(safe-area-inset-top,0px));transform:translateX(-50%);max-width:min(92vw,460px);
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:500;box-shadow:var(--shadow)}
+#nav:not([hidden]) ~ #toast{top:110px}
+
+.wp{width:30px;height:30px;border-radius:50%;background:var(--blaze);color:var(--blaze-ink);border:3px solid #fff;display:grid;place-items:center;font:700 15px/1 var(--font-num);box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.wp.start{background:var(--forest);color:var(--forest-ink);width:36px;height:36px;font-size:18px}
+.km{background:#fff;color:#222;border:1px solid #999;border-radius:8px;font:700 12px/16px var(--font-num);text-align:center;padding:0 4px;width:auto!important;height:auto!important;white-space:nowrap}
+.me{width:20px;height:20px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 2px rgba(26,115,232,.5),0 2px 8px rgba(0,0,0,.4)}
+.leaflet-popup-content button{min-height:36px}
+.simtag{position:absolute;z-index:700;left:50%;transform:translateX(-50%);top:120px;background:#ffd600;color:#222;font-weight:700;padding:2px 10px;border-radius:99px}
+
+
+.tabs{display:flex;gap:6px;padding:0 16px 8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.tab{flex:1;border:1px solid var(--line);background:var(--panel);border-radius:10px;min-height:40px;font-weight:600}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--bg);border-color:transparent}
+.dialwrap{display:flex;align-items:center;gap:14px}
+#dial{width:108px;height:108px;touch-action:none;cursor:pointer;flex:none;border-radius:50%}
+.dialtxt{display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:0}
+.dialtxt b{font:700 22px/1.1 var(--font-num)}
+.modal{position:absolute;z-index:1000;inset:0;background:rgba(10,15,12,.6);display:grid;place-items:end center}
+.sheet{background:var(--panel);width:min(520px,100%);max-height:94%;overflow:auto;border-radius:18px 18px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) max(18px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
+.sheet h2{margin:0;font:700 28px/1 var(--font-num);letter-spacing:.03em;text-transform:uppercase}
+.rate{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.rate button{min-height:46px;padding:0;border:1px solid var(--line);background:var(--panel);border-radius:10px;font:700 22px/1 var(--font-num)}
+.rate button[aria-pressed="true"]{background:var(--blaze);color:var(--blaze-ink);border-color:transparent}
+.hitem{border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.hhead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.hkm{font:700 32px/1 var(--font-num)}.hkm small{font-size:16px;color:var(--muted)}
+.hdate{font-size:13px;color:var(--muted)}
+.hmeta{display:flex;flex-wrap:wrap;gap:2px 14px;font-weight:600}
+.hmeta span{white-space:nowrap}
+.score{font:700 22px/1 var(--font-num);background:var(--soft);border-radius:10px;padding:7px 10px;white-space:nowrap}
+.spark{width:100%;height:44px;display:block}
+.spark .a{fill:var(--soft)}.spark .l{fill:none;stroke:var(--forest);stroke-width:2;vector-effect:non-scaling-stroke}
+.hnote{font-size:14px;overflow-wrap:anywhere}
+.hitem .btn{min-height:38px;padding:6px 10px;font-size:14px}
+.hitem select{min-height:38px;padding:4px 8px}
+.col{display:flex;flex-direction:column;gap:10px}
+.wp.end{background:var(--ink);color:var(--bg);width:36px;height:36px;font-size:18px}
+body[data-mode="p2p"] .loop-only{display:none!important}
+.p2p-only{display:none}
+body[data-mode="p2p"] .p2p-only{display:block}
+@media (min-width:900px){
+  .modal{place-items:center}.sheet{border-radius:18px}
+  #panel{left:12px;right:auto;top:12px;bottom:12px;width:372px;max-height:none;border-radius:18px;padding-bottom:0}
+  #fold{display:none}
+  #navbar{left:50%;right:auto;transform:translateX(-50%);width:460px;bottom:12px;border-radius:18px}
+  #banner{left:50%;right:auto;transform:translateX(-50%);width:460px;top:12px;border-radius:18px}
+  #recenter{bottom:170px}
+}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<div id="map" aria-label="Karte"></div>
+
+<aside id="panel">
+  <div class="grab">
+    <div class="brand">Rundlauf<small>Rundkurs ab deinem Standort, mit Wegen durch Wald und Feld</small></div>
+    <button id="fold" type="button" aria-expanded="true">Einklappen</button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tabPlan" type="button" role="tab" aria-selected="true">Planen</button>
+    <button class="tab" id="tabHist" type="button" role="tab" aria-selected="false">Verlauf</button>
+  </div>
+  <div id="panelBody" class="pbody">
+    <div class="tabs" id="modeSw" style="padding:0" role="tablist" aria-label="Art der Strecke">
+      <button class="tab" id="modeLoop" type="button" role="tab" aria-selected="true">Rundkurs</button>
+      <button class="tab" id="modeP2p" type="button" role="tab" aria-selected="false">Strecke A nach B</button>
+    </div>
+    <section>
+      <div class="lbl">Start</div>
+      <div class="row">
+        <button class="btn" id="btnLocate" type="button">Mein Standort</button>
+        <input type="text" id="search" placeholder="Adresse oder Ort suchen" aria-label="Adresse suchen" enterkeyhint="search">
+        <button class="btn" id="btnSearch" type="button">Suchen</button>
+      </div>
+      <div class="hint" style="margin-top:6px">Oder auf die Karte tippen, um den Start zu setzen. Den Startpunkt kannst du verschieben.</div>
+    </section>
+
+    <section>
+      <div class="lbl loop-only">Distanz</div>
+      <div class="chips loop-only" id="chips"></div>
+      <div class="row loop-only" style="margin-top:10px;align-items:center">
+        <input type="range" id="kmRange" min="2" max="42" step="0.5" value="5" aria-label="Distanz in Kilometern" style="flex:1">
+        <div class="kmbig"><span id="kmVal" style="font-size:34px;color:inherit;margin:0">5</span><span>km</span></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="loop-only" style="flex:1 1 100%">
+          <span class="lbl">Richtung</span>
+          <div class="dialwrap">
+            <svg id="dial" viewBox="-50 -50 100 100" role="slider" tabindex="0" aria-label="Richtung des Rundkurses" aria-valuemin="0" aria-valuemax="359">
+              <circle r="47" fill="var(--soft)" stroke="var(--line)" stroke-width="2"/>
+              <g font-size="10" font-weight="700" fill="var(--muted)" text-anchor="middle" font-family="sans-serif">
+                <text y="-35">N</text><text x="37" y="4">O</text><text y="43">S</text><text x="-37" y="4">W</text></g>
+              <g id="dialArrow"><path d="M0 -31 L10 -6 H3.5 V26 H-3.5 V-6 H-10 Z" fill="var(--blaze)"/></g>
+              <circle r="4" fill="var(--ink)"/>
+            </svg>
+            <div class="dialtxt">
+              <b id="dirTxt">Zufällige Richtung</b>
+              <span class="hint">Zum Einstellen den Pfeil ziehen oder tippen. Der Kurs führt zuerst in diese Richtung.</span>
+              <button class="btn" id="btnDirAuto" type="button">Zufall</button>
+            </div>
+          </div>
+        </div>
+        <label class="field" style="margin:0;flex:1 1 100%"><span class="lbl" style="margin:0">Tempo</span>
+          <select id="paceSel"></select></label>
+      </div>
+    </section>
+
+    <section class="p2p-only hint">Tippe zuerst den Start (oder „Mein Standort“), dann das Ziel auf die Karte. Beide Punkte lassen sich verschieben. Mit „Wegpunkt setzen“ legst du Zwischenpunkte fest. Die Adresssuche setzt erst den Start, dann das Ziel.</section>
+    <section class="row loop-only">
+      <button class="btn primary" id="btnGen" type="button" style="flex:1">Rundkurs erstellen</button>
+      <button class="btn" id="btnAgain" type="button" disabled>Neue Variante</button>
+    </section>
+
+    <section id="routeBox" hidden>
+      <div class="stats">
+        <div class="stat"><b id="sKm">–</b><span>Kilometer</span></div>
+        <div class="stat"><b id="sTime">–</b><span>Laufzeit</span></div>
+        <div class="stat"><b id="sUp">–</b><span>Höhenmeter ↑</span></div>
+      </div>
+      <div id="elevBox" style="margin-top:10px" hidden>
+        <svg class="spark" id="elevPlan" viewBox="0 0 200 44" preserveAspectRatio="none" aria-label="Höhenprofil"></svg>
+        <div class="hint" id="elevTxt"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnAdd" type="button" aria-pressed="false">Wegpunkt setzen</button>
+        <button class="btn" id="btnRev" type="button">Gegenrichtung</button>
+        <button class="btn" id="btnGpx" type="button">GPX</button>
+      </div>
+      <div class="hint" style="margin-top:6px">Zahlen auf der Karte ziehen, um die Strecke anzupassen. Antippen zum Entfernen. Mit „Wegpunkt setzen“ tippst du neue Punkte auf die Karte.</div>
+    </section>
+
+    <details>
+      <summary>Karte und Routing</summary>
+      <label class="field"><span class="lbl" style="margin:0">Kartenstil</span>
+        <select id="baseSel"><option value="osm">Standard</option><option value="topo">Topo (Wanderwege, Höhenlinien)</option><option value="sat">Satellit</option></select></label>
+      <label class="row" style="margin-top:10px;gap:10px"><input type="checkbox" id="trailChk"> Markierte Wanderwege einblenden</label>
+      <button class="btn" id="btnPinInfo" type="button" style="margin-top:10px">Anleitung: Tasche-Modus</button>
+      <label class="field"><span class="lbl" style="margin:0">Routing</span>
+        <select id="provSel"><option value="brt">BRouter Trekking (bevorzugt Wege)</option><option value="brh">BRouter Wandern</option><option value="osm">OSM Fußweg</option></select></label>
+      <div class="hint" style="margin-top:6px">Schlägt ein Dienst fehl, probiert die App automatisch die anderen.</div>
+    </details>
+
+    <button class="btn go" id="btnNav" type="button" disabled>Navigation starten</button>
+  </div>
+  <div id="histBody" class="pbody" hidden>
+    <div class="stats" id="hTotals"></div>
+    <div class="col" id="hList"></div>
+    <div class="row"><button class="btn" id="btnHExport" type="button">Verlauf sichern (JSON)</button><label class="btn" for="hImport" style="display:inline-flex;align-items:center;cursor:pointer">Laden</label><input type="file" id="hImport" accept="application/json" hidden></div>
+    <div class="hint">Der Verlauf liegt nur in diesem Browser auf diesem Gerät. Sichere ihn gelegentlich.</div>
+  </div>
+</aside>
+
+<div id="nav" hidden>
+  <div id="banner" role="status" aria-live="polite">
+    <svg id="arrow" viewBox="0 0 48 48" aria-hidden="true"><g id="arrowG" transform-origin="24 24"><path d="M24 4 L38 22 H29 V44 H19 V22 H10 Z" fill="currentColor"/></g></svg>
+    <div><div class="dist" id="nDist">–</div><div class="what" id="nWhat">Start…</div></div>
+  </div>
+  <button class="btn" id="recenter" type="button" hidden>Zentrieren</button>
+  <div id="navbar">
+    <div class="stats">
+      <div class="stat"><b id="nRest">–</b><span>km Rest</span></div>
+      <div class="stat"><b id="nTime">–</b><span>Zeit Rest</span></div>
+      <div class="stat"><b id="nDone">0</b><span>km gelaufen</span></div>
+    </div>
+    <div class="bar"><i id="nBar"></i></div>
+    <div class="row">
+      <button class="btn" id="btnDim" type="button">Abdunkeln</button>
+      <button class="btn" id="btnMute" type="button" aria-pressed="false">Ton an</button>
+      <button class="btn" id="btnRejoin" type="button">Neu berechnen</button>
+      <button class="btn" id="btnHome" type="button">Direkt zum Start</button>
+      <button class="btn" id="btnStop" type="button" style="margin-left:auto">Beenden</button>
+    </div>
+    <div class="row" id="simRow" hidden>
+      <span class="hint">Simulation läuft</span>
+      <button class="btn" id="btnOff" type="button">Abweichung testen</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="finish" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="fTitle">
+    <h2 id="fTitle">Lauf beendet</h2>
+    <div class="stats">
+      <div class="stat"><b id="fKm">–</b><span>Kilometer</span></div>
+      <div class="stat"><b id="fTime">–</b><span>Zeit</span></div>
+      <div class="stat"><b id="fPace">–</b><span>min/km</span></div>
+    </div>
+    <div class="stats" style="grid-template-columns:repeat(2,1fr)">
+      <div class="stat"><b id="fUp">…</b><span>Höhenmeter hoch</span></div>
+      <div class="stat"><b id="fDown">…</b><span>Höhenmeter runter</span></div>
+    </div>
+    <svg class="spark" id="fProf" viewBox="0 0 200 44" preserveAspectRatio="none" aria-label="Höhenprofil"></svg>
+    <div><div class="lbl">Wie war der Lauf? (0 bis 10)</div><div class="rate" id="fRate"></div></div>
+    <input type="text" id="fNote" placeholder="Notiz (optional), z. B. Wetter, Gefühl" maxlength="200">
+    <div class="hint" id="fHint"></div>
+    <div class="row"><button class="btn go" id="fSave" type="button" style="flex:1">Speichern</button><button class="btn" id="fDiscard" type="button">Verwerfen</button></div>
+  </div>
+</div>
+<div class="modal" id="pinHelp" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="pTitle">
+    <h2 id="pTitle">Tasche-Modus</h2>
+    <div>So bleibt die Navigation in der Tasche aktiv und die Android-Tasten reagieren nicht:</div>
+    <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">
+      <li><b>Einmalig einschalten:</b> Einstellungen, Sicherheit und Datenschutz, Weitere Sicherheitseinstellungen, <b>Bildschirm fixieren</b> (bei Pixel: Sicherheit, App-Fixierung). Dort „Vor dem Lösen PIN abfragen“ aktivieren.</li>
+      <li><b>Vor dem Lauf:</b> Navigation starten, dann die Übersichtstaste (links) drücken, oben auf das App-Symbol tippen und <b>„Diese App fixieren“</b> wählen.</li>
+      <li>Auf <b>Abdunkeln</b> tippen und das Handy einstecken. Zum Aufhellen zweimal tippen.</li>
+      <li><b>Lösen:</b> Zurück- und Übersichtstaste gleichzeitig gedrückt halten (bei Gestensteuerung: nach oben wischen und halten), dann PIN eingeben.</li>
+    </ol>
+    <div class="hint">Den Power-Knopf nicht drücken. Ein ausgeschaltetes Display beendet das Tracking.</div>
+    <div class="row"><button class="btn go" id="pinGo" type="button" style="flex:1">Verstanden</button></div>
+  </div>
+</div>
+<div id="dim" hidden role="button" aria-label="Zum Aufhellen zweimal tippen" style="position:fixed;inset:0;z-index:1200;background:#000;color:#4a4a4a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px">
+  <div id="dimDist" style="font:700 64px/1 var(--font-num)"></div>
+  <div id="dimWhat" style="font:600 22px/1.2 var(--font-ui)"></div>
+  <div style="font-size:13px;margin-top:40px;color:#333">Navigation läuft. Zum Aufhellen zweimal tippen.</div>
+</div>
+<div id="toast" role="status" hidden></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+//#PURE-START
+const R = 6371000, rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+function hav(a, b) {
+  const dLat = rad(b[0] - a[0]), dLng = rad(b[1] - a[1]);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function brg(a, b) {
+  const y = Math.sin(rad(b[1] - a[1])) * Math.cos(rad(b[0]));
+  const x = Math.cos(rad(a[0])) * Math.sin(rad(b[0])) - Math.sin(rad(a[0])) * Math.cos(rad(b[0])) * Math.cos(rad(b[1] - a[1]));
+  return (deg(Math.atan2(y, x)) + 360) % 360;
+}
+function dest(a, b, d) {
+  const δ = d / R, θ = rad(b), φ1 = rad(a[0]), λ1 = rad(a[1]);
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+  return [deg(φ2), ((deg(λ2) + 540) % 360) - 180];
+}
+function cumulative(pts) {
+  const c = [0];
+  for (let i = 1; i < pts.length; i++) c.push(c[i - 1] + hav(pts[i - 1], pts[i]));
+  return c;
+}
+function densify(pts, max = 25) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const d = hav(pts[i - 1], pts[i]), n = Math.ceil(d / max);
+    for (let k = 1; k < n; k++) {
+      const t = k / n;
+      out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]);
+    }
+    out.push(pts[i]);
+  }
+  return out;
+}
+// Position auf der Strecke finden: nächster Punkt auf den Segmenten im Bereich [fromM, toM] (Streckenmeter)
+function locateOnRoute(pts, cum, p, fromM, toM) {
+  const kx = Math.cos(rad(p[0])) * 111320, ky = 110540;
+  let best = { dist: Infinity, s: 0, i: 0 };
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (cum[i + 1] < fromM) continue;
+    if (cum[i] > toM) break;
+    const ax = (pts[i][1] - p[1]) * kx, ay = (pts[i][0] - p[0]) * ky;
+    const bx = (pts[i + 1][1] - p[1]) * kx, by = (pts[i + 1][0] - p[0]) * ky;
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    let t = l2 ? -(ax * dx + ay * dy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(ax + dx * t, ay + dy * t);
+    if (d < best.dist) best = { dist: d, s: cum[i] + t * (cum[i + 1] - cum[i]), i };
+  }
+  return best;
+}
+// Abbiegehinweise aus der Geometrie ableiten
+function makeInstructions(pts, cum) {
+  const n = pts.length, W = 30, cand = [];
+  for (let i = 1; i < n - 1; i++) {
+    if (cum[i] < W || cum[n - 1] - cum[i] < W) continue;
+    let j = i; while (j > 0 && cum[i] - cum[j] < W) j--;
+    let k = i; while (k < n - 1 && cum[k] - cum[i] < W) k++;
+    const delta = ((brg(pts[i], pts[k]) - brg(pts[j], pts[i]) + 540) % 360) - 180;
+    if (Math.abs(delta) >= 50) cand.push({ s: cum[i], delta });
+  }
+  const out = [];
+  let group = [];
+  const flush = () => {
+    if (!group.length) return;
+    const g = group.reduce((a, b) => Math.abs(b.delta) > Math.abs(a.delta) ? b : a);
+    const mag = Math.abs(g.delta), right = g.delta > 0;
+    const side = right ? 'rechts' : 'links';
+    const text = mag >= 135 ? `scharf ${side} abbiegen` : mag >= 75 ? `${side} abbiegen` : `leicht ${side} halten`;
+    const prev = out[out.length - 1];
+    if (!prev || g.s - prev.s > 45) out.push({ s: g.s, text, delta: g.delta, a1: false, a2: false });
+    group = [];
+  };
+  for (const c of cand) {
+    if (group.length && c.s - group[group.length - 1].s > 25) flush();
+    group.push(c);
+  }
+  flush();
+  return out;
+}
+// Ring-Wegpunkte: Kreis durch den Startpunkt. k = Umweg-Faktor.
+function ringWaypoints(start, distM, k, bearing, n = 4) {
+  const r = distM / (2 * Math.PI * k);
+  const center = dest(start, bearing, r);
+  const a0 = (bearing + 180) % 360;
+  const pts = [];
+  for (let i = 1; i <= n; i++) pts.push(dest(center, (a0 + i * 360 / (n + 1)) % 360, r));
+  return pts;
+}
+function fmtTime(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}h` : `${m}:${String(s).padStart(2, '0')}`;
+}
+//#PURE-END
+
+/* ---------- Native App (Capacitor) ---------- */
+const CAP = window.Capacitor;
+const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
+const PL = (NATIVE && CAP.Plugins) || {};
+const BG = PL.BackgroundGeolocation || null;
+async function saveFile(name, text, mime) {
+  if (NATIVE && PL.Filesystem && PL.Share) {
+    try {
+      const r = await PL.Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
+      await PL.Share.share({ title: name, url: r.uri, dialogTitle: 'Speichern oder teilen' });
+    } catch (e) { toast('Speichern nicht möglich.'); }
+    return;
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ---------- Zustand ---------- */
+const S = {
+  start: null, wps: [], pts: [], cum: [], instr: [], km: 5, pace: 6, provider: 'brt',
+  bearing: 0, addMode: false, token: 0, busy: false, dir: null, elev: null, etok: 0, mode: 'loop', end: null
+};
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+let toastT;
+function toast(msg, ms = 3500) {
+  const t = $('toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms);
+}
+
+/* ---------- Karte ---------- */
+const map = L.map('map', { zoomControl: false }).setView([51.16, 10.45], 6);
+L.control.zoom({ position: 'topright' }).addTo(map);
+const base = {
+  osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap-Mitwirkende' }),
+  topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenStreetMap, SRTM | OpenTopoMap (CC-BY-SA)' }),
+  sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' })
+};
+const trails = L.tileLayer('https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png', { maxZoom: 18, opacity: .85, attribution: '© waymarkedtrails.org' });
+let curBase = base.osm.addTo(map);
+$('baseSel').onchange = e => { map.removeLayer(curBase); curBase = base[e.target.value].addTo(map); curBase.bringToBack(); store.set('base', e.target.value); };
+$('trailChk').onchange = e => { e.target.checked ? trails.addTo(map) : map.removeLayer(trails); store.set('trail', e.target.checked); };
+
+const lines = L.layerGroup().addTo(map);
+const histLayer = L.layerGroup().addTo(map);
+const markers = L.layerGroup().addTo(map);
+let startMk = null, wpMks = [];
+
+function icon(label, cls) { const big = cls === 'start' || cls === 'end'; return L.divIcon({ className: '', html: `<div class="wp ${cls || ''}">${label}</div>`, iconSize: big ? [36, 36] : [30, 30], iconAnchor: big ? [18, 18] : [15, 15] }); }
+const pointsList = () => S.mode === 'p2p' ? [S.start, ...S.wps, S.end] : [S.start, ...S.wps, S.start];
+
+function drawMarkers() {
+  markers.clearLayers(); wpMks = []; startMk = null;
+  if (S.start) {
+    startMk = L.marker(S.start, { icon: icon('S', 'start'), draggable: true, zIndexOffset: 1000 }).addTo(markers);
+    startMk.on('dragend', () => { const p = startMk.getLatLng(); S.start = [p.lat, p.lng]; persist(); recompute(); });
+  }
+  if (S.mode === 'p2p' && S.end) {
+    const em = L.marker(S.end, { icon: icon('Z', 'end'), draggable: true, zIndexOffset: 900 }).addTo(markers);
+    em.on('dragend', () => { const q = em.getLatLng(); S.end = [q.lat, q.lng]; persist(); recompute(); });
+  }
+  S.wps.forEach((w, i) => {
+    const m = L.marker(w, { icon: icon(i + 1), draggable: true, zIndexOffset: 500 }).addTo(markers);
+    m.on('dragend', () => { const p = m.getLatLng(); S.wps[i] = [p.lat, p.lng]; persist(); recompute(); });
+    const box = document.createElement('div');
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = `Wegpunkt ${i + 1} entfernen`;
+    b.onclick = () => { S.wps.splice(i, 1); map.closePopup(); persist(); recompute(); };
+    box.appendChild(b); m.bindPopup(box);
+    wpMks.push(m);
+  });
+}
+
+function drawRoute() {
+  lines.clearLayers();
+  if (S.pts.length < 2) return;
+  L.polyline(S.pts, { color: '#fff', weight: 9, opacity: .9, lineCap: 'round', lineJoin: 'round' }).addTo(lines);
+  L.polyline(S.pts, { color: '#ff5a1f', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(lines);
+  const total = S.cum[S.cum.length - 1];
+  for (let km = 1; km * 1000 < total - 300; km++) {
+    const loc = pointAt(km * 1000);
+    L.marker(loc, { icon: L.divIcon({ className: 'km', html: km, iconSize: null }), interactive: false, keyboard: false }).addTo(lines);
+  }
+}
+function pointAt(s) {
+  const c = S.cum, p = S.pts;
+  let i = 0; while (i < c.length - 2 && c[i + 1] < s) i++;
+  const t = (s - c[i]) / ((c[i + 1] - c[i]) || 1);
+  return [p[i][0] + (p[i + 1][0] - p[i][0]) * t, p[i][1] + (p[i + 1][1] - p[i][1]) * t];
+}
+
+function fit(p) {
+  p = Array.isArray(p) ? p : S.pts;
+  if (p.length < 2) return;
+  const desk = innerWidth >= 900;
+  map.fitBounds(L.latLngBounds(p), {
+    paddingTopLeft: [desk ? 400 : 24, 70],
+    paddingBottomRight: [24, desk ? 24 : Math.min($('panel').offsetHeight, innerHeight * .62) + 10], maxZoom: 16
+  });
+}
+
+/* ---------- Routing ---------- */
+async function getJson(url) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+const PROV = {
+  osm: async pts => {
+    const c = pts.map(p => p[1].toFixed(6) + ',' + p[0].toFixed(6)).join(';');
+    const j = await getJson(`https://routing.openstreetmap.de/routed-foot/route/v1/foot/${c}?overview=full&geometries=geojson&continue_straight=false`);
+    if (j.code !== 'Ok') throw new Error(j.code);
+    return j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+  },
+  brt: pts => brouter(pts, 'trekking'),
+  brh: pts => brouter(pts, 'hiking-mountain')
+};
+async function brouter(pts, profile) {
+  const c = pts.map(p => p[1].toFixed(6) + ',' + p[0].toFixed(6)).join('|');
+  const j = await getJson(`https://brouter.de/brouter?lonlats=${c}&profile=${profile}&alternativeidx=0&format=geojson`);
+  return j.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
+}
+async function routeVia(points) {
+  const order = [S.provider, ...['brt', 'brh', 'osm'].filter(p => p !== S.provider)];
+  let lastErr;
+  for (const p of order) {
+    try {
+      const r = await PROV[p](points);
+      if (r && r.length > 1) { if (p !== S.provider) toast('Routing-Dienst gewechselt, der gewählte war nicht erreichbar.'); return r; }
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('Kein Routing möglich');
+}
+
+function setRoute(raw) {
+  S.pts = densify(raw, 25);
+  S.cum = cumulative(S.pts);
+  S.instr = makeInstructions(S.pts, S.cum);
+  S.elev = null;
+  drawRoute(); updateStats();
+  if (!nav.on) planElev();
+}
+function updateStats() {
+  const has = S.pts.length > 1;
+  $('routeBox').hidden = !has;
+  $('btnNav').disabled = !has;
+  $('btnAgain').disabled = !S.start;
+  if (!has) return;
+  const m = S.cum[S.cum.length - 1];
+  $('sKm').textContent = (m / 1000).toFixed(1);
+  $('sTime').textContent = fmtTime(m / 1000 * S.pace * 60);
+  $('sUp').textContent = S.elev ? Math.round(S.elev.up) : '–';
+  $('elevBox').hidden = !S.elev;
+}
+function persist() { store.set('plan', { start: S.start, wps: S.wps, km: S.km, pace: S.pace, provider: S.provider, dir: S.dir, mode: S.mode, end: S.end }); }
+function busy(on, label) {
+  S.busy = on;
+  $('btnGen').disabled = on; $('btnAgain').disabled = on || !S.start;
+  $('btnGen').textContent = on ? (label || 'Berechne…') : 'Rundkurs erstellen';
+}
+
+async function generate(newBearing) {
+  if (!S.start) { toast('Setze zuerst einen Startpunkt: Mein Standort oder Tippen auf die Karte.'); return; }
+  const token = ++S.token;
+  if (newBearing || S.bearing == null) S.bearing = S.dir == null ? Math.random() * 360 : (S.dir + (Math.random() - .5) * 40 + 360) % 360;
+  const D = S.km * 1000;
+  let k = 1.3, best = null;
+  busy(true, 'Suche Wege…');
+  try {
+    for (let it = 0; it < 5; it++) {
+      const w = ringWaypoints(S.start, D, k, S.bearing);
+      const raw = await routeVia([S.start, ...w, S.start]);
+      if (token !== S.token) return;
+      const L_ = cumulative(raw).pop();
+      const err = Math.abs(L_ - D) / D;
+      if (!best || err < best.err) best = { raw, w, err };
+      if (err < .06) break;
+      k *= L_ / D;
+      busy(true, `Passe an (${(L_ / 1000).toFixed(1)} km)…`);
+    }
+    // Wegpunkte auf den tatsächlichen Weg einrasten, damit Verschieben stabil bleibt
+    const dense = densify(best.raw, 25);
+    S.wps = best.w.map(p => { let b = dense[0], bd = 1e12; for (const q of dense) { const d = hav(p, q); if (d < bd) { bd = d; b = q; } } return [b[0], b[1]]; });
+    setRoute(best.raw); drawMarkers(); persist(); fit();
+    if (best.err > .15) toast(`Beste Strecke: ${(S.cum[S.cum.length - 1] / 1000).toFixed(1)} km. Mit Wegpunkten kannst du nachjustieren.`);
+  } catch (e) {
+    toast('Route konnte nicht berechnet werden. Prüfe die Internetverbindung.', 5000);
+  } finally { if (token === S.token) busy(false); }
+}
+
+async function recompute() {
+  if (!S.start) return;
+  if (S.mode === 'p2p' ? !S.end : !S.wps.length) { S.token++; S.pts = []; S.cum = []; S.elev = null; lines.clearLayers(); drawMarkers(); updateStats(); return; }
+  const token = ++S.token;
+  busy(true, 'Berechne…');
+  try {
+    const raw = await routeVia(pointsList());
+    if (token !== S.token) return;
+    setRoute(raw);
+    drawMarkers();
+    if (S.mode === 'p2p' && !S.pts.length) return;
+  } catch (e) { toast('Neuberechnung fehlgeschlagen.', 4000); }
+  finally { if (token === S.token) busy(false); }
+}
+
+/* ---------- Eingaben ---------- */
+const CHIPS = [3, 5, 7, 10, 15, 21];
+function setKm(v) {
+  S.km = v; $('kmRange').value = v; $('kmVal').textContent = v;
+  document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(+c.dataset.km === v)));
+  persist();
+}
+CHIPS.forEach(k => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.dataset.km = k; b.textContent = k; b.onclick = () => setKm(k); $('chips').appendChild(b); });
+$('kmRange').oninput = e => setKm(+e.target.value);
+for (let p = 4; p <= 9; p += .5) { const o = document.createElement('option'); o.value = p; const m = Math.floor(p), s = (p - m) * 60; o.textContent = `${m}:${String(s).padStart(2, '0')} min/km`; $('paceSel').appendChild(o); }
+$('paceSel').onchange = e => { S.pace = +e.target.value; persist(); updateStats(); };
+$('provSel').onchange = e => { S.provider = e.target.value; persist(); };
+$('fold').onclick = () => { const f = $('panel').classList.toggle('folded'); $('fold').textContent = f ? 'Ausklappen' : 'Einklappen'; $('fold').setAttribute('aria-expanded', String(!f)); };
+
+function setStart(p, pan = true) {
+  S.start = [p[0], p[1]]; S.wps = []; S.pts = []; S.cum = []; S.elev = null; lines.clearLayers(); histLayer.clearLayers();
+  drawMarkers(); updateStats(); persist();
+  if (pan) map.setView(S.start, Math.max(map.getZoom(), 14));
+  if (S.mode === 'p2p' && S.end) recompute();
+}
+function locate(cb) {
+  if (!navigator.geolocation) { toast('Dein Browser unterstützt keine Standortbestimmung.'); return; }
+  toast('Standort wird ermittelt…', 2500);
+  navigator.geolocation.getCurrentPosition(pos => { setStart([pos.coords.latitude, pos.coords.longitude]); cb && cb(); },
+    err => toast(err.code === 1 ? 'Standortzugriff blockiert. Erlaube ihn in den Browser-Einstellungen oder tippe auf die Karte.' : 'Standort nicht verfügbar. Tippe auf die Karte, um den Start zu setzen.', 5000),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+}
+$('btnLocate').onclick = () => locate();
+async function doSearch() {
+  const q = $('search').value.trim(); if (!q) return;
+  try {
+    const j = await getJson(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+    if (!j.length) { toast('Nichts gefunden.'); return; }
+    const q = [+j[0].lat, +j[0].lon];
+    if (S.mode === 'p2p' && S.start && !S.end) { S.end = q; persist(); drawMarkers(); recompute().then(() => fit()); } else setStart(q);
+  } catch (e) { toast('Suche nicht möglich.'); }
+}
+$('btnSearch').onclick = doSearch;
+$('search').onkeydown = e => { if (e.key === 'Enter') doSearch(); };
+$('btnGen').onclick = () => generate(true);
+$('btnAgain').onclick = () => generate(true);
+
+$('btnAdd').onclick = () => { S.addMode = !S.addMode; $('btnAdd').classList.toggle('on', S.addMode); $('btnAdd').setAttribute('aria-pressed', String(S.addMode)); $('btnAdd').textContent = S.addMode ? 'Tippe auf die Karte…' : 'Wegpunkt setzen'; };
+$('btnRev').onclick = () => { S.wps.reverse(); if (S.mode === 'p2p' && S.end) { const t = S.start; S.start = S.end; S.end = t; } persist(); drawMarkers(); recompute(); };
+map.on('click', e => {
+  if (nav.on) return;
+  const p = [e.latlng.lat, e.latlng.lng];
+  if (!S.start) { setStart(p, false); return; }
+  if (S.mode === 'p2p' && !S.end) { S.end = p; persist(); drawMarkers(); recompute().then(() => fit()); return; }
+  if (S.addMode) {
+    const P = pointsList();
+    let bi = 0, bc = Infinity;
+    for (let i = 0; i < P.length - 1; i++) { const c = hav(P[i], p) + hav(p, P[i + 1]) - hav(P[i], P[i + 1]); if (c < bc) { bc = c; bi = i; } }
+    S.wps.splice(bi, 0, p); persist(); drawMarkers(); recompute();
+  }
+});
+$('btnGpx').onclick = () => {
+  if (!S.pts.length) return;
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Rundlauf" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Rundlauf ${(S.cum[S.cum.length - 1] / 1000).toFixed(1)} km</name><trkseg>` +
+    S.pts.map(p => `<trkpt lat="${p[0].toFixed(6)}" lon="${p[1].toFixed(6)}"/>`).join('') + `</trkseg></trk></gpx>`;
+  saveFile('rundlauf.gpx', gpx, 'application/gpx+xml');
+};
+
+
+/* ---------- Modus: Rundkurs oder Strecke A nach B ---------- */
+function applyMode(m) {
+  S.mode = m; document.body.dataset.mode = m;
+  $('modeLoop').setAttribute('aria-selected', String(m === 'loop')); $('modeP2p').setAttribute('aria-selected', String(m === 'p2p'));
+  $('btnRev').textContent = m === 'p2p' ? 'Start und Ziel tauschen' : 'Gegenrichtung';
+}
+function switchMode(m) {
+  if (m === S.mode) return;
+  applyMode(m);
+  S.wps = []; S.pts = []; S.cum = []; S.elev = null; lines.clearLayers(); histLayer.clearLayers();
+  S.addMode = false; $('btnAdd').classList.remove('on'); $('btnAdd').setAttribute('aria-pressed', 'false'); $('btnAdd').textContent = 'Wegpunkt setzen';
+  drawMarkers(); updateStats(); persist();
+  if (m === 'p2p' && S.start && S.end) recompute().then(() => fit());
+  else if (m === 'p2p' && S.start) toast('Tippe jetzt das Ziel auf die Karte.');
+}
+$('modeLoop').onclick = () => switchMode('loop'); $('modeP2p').onclick = () => switchMode('p2p');
+
+/* ---------- Kompass ---------- */
+const DIRN = ['Nord', 'Nordost', 'Ost', 'Südost', 'Süd', 'Südwest', 'West', 'Nordwest'];
+function setDir(a) {
+  S.dir = a == null ? null : ((a % 360) + 360) % 360;
+  $('dialArrow').setAttribute('transform', `rotate(${S.dir == null ? 0 : S.dir})`);
+  $('dialArrow').style.opacity = S.dir == null ? .25 : 1;
+  $('dirTxt').textContent = S.dir == null ? 'Zufällige Richtung' : `${DIRN[Math.round(S.dir / 45) % 8]} (${Math.round(S.dir)}°)`;
+  $('btnDirAuto').classList.toggle('on', S.dir == null);
+  $('dial').setAttribute('aria-valuenow', S.dir == null ? '' : Math.round(S.dir));
+  persist();
+}
+(function () {
+  const d = $('dial');
+  const fromEvent = e => { const r = d.getBoundingClientRect(); setDir(deg(Math.atan2(e.clientX - (r.left + r.width / 2), -(e.clientY - (r.top + r.height / 2))))); };
+  d.addEventListener('pointerdown', e => { d.setPointerCapture(e.pointerId); fromEvent(e); });
+  d.addEventListener('pointermove', e => { if (e.buttons) fromEvent(e); });
+  d.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 45 : 15;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { setDir((S.dir || 0) + step); e.preventDefault(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { setDir((S.dir || 0) - step); e.preventDefault(); }
+  });
+  $('btnDirAuto').onclick = () => setDir(null);
+})();
+
+/* ---------- Höhen ---------- */
+function sampleRoute(pts, cum, maxN = 300, minStep = 60) {
+  const total = cum[cum.length - 1], n = Math.max(2, Math.min(maxN, Math.ceil(total / minStep) + 1));
+  const coords = [], ss = []; let i = 0;
+  for (let k = 0; k < n; k++) {
+    const s = total * k / (n - 1);
+    while (i < cum.length - 2 && cum[i + 1] < s) i++;
+    const t = Math.min(1, Math.max(0, (s - cum[i]) / ((cum[i + 1] - cum[i]) || 1)));
+    coords.push([pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t]); ss.push(s);
+  }
+  return { coords, s: ss };
+}
+async function fetchElev(coords) {
+  const out = [];
+  for (let i = 0; i < coords.length; i += 100) {
+    const ch = coords.slice(i, i + 100);
+    const j = await getJson(`https://api.open-meteo.com/v1/elevation?latitude=${ch.map(c => c[0].toFixed(5)).join(',')}&longitude=${ch.map(c => c[1].toFixed(5)).join(',')}`);
+    if (!j.elevation || j.elevation.length !== ch.length) throw new Error('elev');
+    out.push(...j.elevation);
+  }
+  return out;
+}
+//#PURE2-START
+function elevStats(el) {
+  const sm = el.map((_, i) => { let a = 0, c = 0; for (let k = Math.max(0, i - 2); k <= Math.min(el.length - 1, i + 2); k++) { a += el[k]; c++; } return a / c; });
+  let up = 0, down = 0, ref = sm[0];
+  for (const v of sm) { if (v - ref >= 2) { up += v - ref; ref = v; } else if (ref - v >= 2) { down += ref - v; ref = v; } }
+  return { up, down, min: Math.min(...sm), max: Math.max(...sm) };
+}
+function resample(arr, n) {
+  if (arr.length <= n) return arr.slice();
+  const out = [];
+  for (let k = 0; k < n; k++) out.push(arr[Math.round(k * (arr.length - 1) / (n - 1))]);
+  return out;
+}
+function sparkSvg(vals) {
+  if (!vals || vals.length < 2) return '';
+  const mn = Math.min(...vals), mx = Math.max(...vals), span = Math.max(mx - mn, 10), pad = (span - (mx - mn)) / 2;
+  const y = v => 40 - ((v - mn + pad) / span) * 36;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1) * 200).toFixed(1)},${y(v).toFixed(1)}`);
+  return `<path class="a" d="M0,44 L${pts.join(' L')} L200,44 Z"/><path class="l" d="M${pts.join(' L')}"/>`;
+}
+//#PURE2-END
+async function planElev() {
+  if (S.pts.length < 2) return;
+  const tok = ++S.etok;
+  try {
+    const sm = sampleRoute(S.pts, S.cum), el = await fetchElev(sm.coords);
+    if (tok !== S.etok) return;
+    S.elev = Object.assign({ el }, elevStats(el));
+    $('elevPlan').innerHTML = sparkSvg(el);
+    $('elevTxt').textContent = `↑ ${Math.round(S.elev.up)} m   ↓ ${Math.round(S.elev.down)} m   ·   ${Math.round(S.elev.min)} bis ${Math.round(S.elev.max)} m ü. NN`;
+    updateStats();
+  } catch (e) { if (tok === S.etok) { S.elev = null; updateStats(); } }
+}
+
+/* ---------- Verlauf ---------- */
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = n => String(n).padStart(2, '0');
+const fmtPace = (sec, m) => { if (!m) return '–'; const p = sec / (m / 1000); return `${Math.floor(p / 60)}:${pad2(Math.round(p % 60) % 60)}`; };
+let hist = store.get('hist', []);
+function saveHist() { store.set('hist', hist); }
+function setTab(t) {
+  const h = t === 'hist';
+  $('tabPlan').setAttribute('aria-selected', String(!h)); $('tabHist').setAttribute('aria-selected', String(h));
+  $('panelBody').hidden = h; $('histBody').hidden = !h;
+  if (h) renderHist(); else histLayer.clearLayers();
+}
+$('tabPlan').onclick = () => setTab('plan'); $('tabHist').onclick = () => setTab('hist');
+function renderHist() {
+  const tk = hist.reduce((a, e) => a + e.dist, 0), rated = hist.filter(e => e.rating != null);
+  $('hTotals').innerHTML = `<div class="stat"><b>${hist.length}</b><span>Läufe</span></div><div class="stat"><b>${(tk / 1000).toFixed(1)}</b><span>km gesamt</span></div><div class="stat"><b>${rated.length ? (rated.reduce((a, e) => a + e.rating, 0) / rated.length).toFixed(1) : '–'}</b><span>Ø Bewertung</span></div>`;
+  const box = $('hList');
+  if (!hist.length) { box.innerHTML = '<div class="hint">Noch keine Läufe. Nach jeder Navigation kannst du den Lauf mit Strecke, Zeit, Höhenmetern und deiner Bewertung speichern.</div>'; return; }
+  box.innerHTML = hist.map(e => {
+    const d = new Date(e.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const opts = ['–', ...Array.from({ length: 11 }, (_, i) => i)].map(v => `<option value="${v}" ${(v === '–' ? e.rating == null : e.rating === v) ? 'selected' : ''}>${v === '–' ? 'ohne' : v}</option>`).join('');
+    return `<div class="hitem" data-id="${e.id}">
+      <div class="hhead"><div><div class="hkm">${(e.dist / 1000).toFixed(2)} <small>km</small></div><div class="hdate">${d}</div></div>
+      <div class="score">${e.rating == null ? '–' : e.rating}/10</div></div>
+      <div class="hmeta"><span>Zeit ${fmtTime(e.sec)}</span><span>Pace ${fmtPace(e.sec, e.dist)} /km</span><span>↑ ${e.up == null ? '–' : Math.round(e.up)} m</span><span>↓ ${e.down == null ? '–' : Math.round(e.down)} m</span></div>
+      ${e.prof && e.prof.length > 1 ? `<svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-label="Höhenprofil">${sparkSvg(e.prof)}</svg>` : ''}
+      ${e.note ? `<div class="hnote">${esc(e.note)}</div>` : ''}
+      <div class="row"><label class="hint">Bewertung <select data-act="rate">${opts}</select></label>
+      <button class="btn" data-act="map" type="button">Karte</button><button class="btn" data-act="again" type="button">Nochmal laufen</button><button class="btn" data-act="del" type="button">Löschen</button></div></div>`;
+  }).join('');
+}
+$('hList').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-act]'); if (!b || b.tagName === 'SELECT') return;
+  const id = +b.closest('.hitem').dataset.id, e = hist.find(x => x.id === id); if (!e) return;
+  if (b.dataset.act === 'del') {
+    if (b.dataset.sure) { hist = hist.filter(x => x.id !== id); saveHist(); renderHist(); } else { b.dataset.sure = '1'; b.textContent = 'Sicher löschen?'; setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = 'Löschen'; } }, 3000); }
+  } else if (b.dataset.act === 'map') {
+    histLayer.clearLayers();
+    if (e.track && e.track.length > 1) { L.polyline(e.track, { color: '#fff', weight: 8 }).addTo(histLayer); L.polyline(e.track, { color: '#1a73e8', weight: 4 }).addTo(histLayer); fit(e.track); }
+  } else if (b.dataset.act === 'again') {
+    S.start = e.start; S.wps = e.wps || []; S.end = e.end || null; applyMode(e.mode || 'loop'); S.pts = []; S.cum = []; S.elev = null; lines.clearLayers();
+    setTab('plan'); drawMarkers(); persist(); recompute().then(() => fit());
+  }
+});
+$('hList').addEventListener('change', ev => {
+  if (ev.target.dataset.act !== 'rate') return;
+  const e = hist.find(x => x.id === +ev.target.closest('.hitem').dataset.id); if (!e) return;
+  e.rating = ev.target.value === '–' ? null : +ev.target.value; saveHist(); renderHist();
+});
+$('btnHExport').onclick = () => {
+  saveFile('rundlauf-verlauf.json', JSON.stringify(hist), 'application/json');
+};
+$('hImport').onchange = async ev => {
+  try {
+    const arr = JSON.parse(await ev.target.files[0].text());
+    if (!Array.isArray(arr)) throw 0;
+    const ids = new Set(hist.map(h => h.id));
+    arr.forEach(x => { if (x && typeof x.dist === 'number' && !ids.has(x.id)) hist.push(x); });
+    hist.sort((a, b) => b.t - a.t); saveHist(); renderHist(); toast('Verlauf geladen.');
+  } catch (e) { toast('Datei konnte nicht gelesen werden.'); }
+  ev.target.value = '';
+};
+
+/* ---------- Lauf beenden und speichern ---------- */
+let run = null;
+for (let i = 0; i <= 10; i++) { const b = document.createElement('button'); b.type = 'button'; b.textContent = i; b.setAttribute('aria-pressed', 'false'); b.onclick = () => { if (!run) return; run.rating = run.rating === i ? null : i; document.querySelectorAll('#fRate button').forEach((x, k) => x.setAttribute('aria-pressed', String(run.rating === k))); }; $('fRate').appendChild(b); }
+function finishRun() {
+  if (nav.fin) return;
+  nav.fin = true; nav.on = false;
+  stopTracking();
+  if (nav.sim) clearInterval(nav.sim); nav.sim = null;
+  try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  run = { id: Date.now(), t: nav.t0, dist: nav.dist, sec: (Date.now() - nav.t0) / 1000, track: nav.track.slice(), sim: !!nav.simMode, rating: null, up: null, down: null, prof: null, start: S.start, wps: S.wps.slice(), end: S.end, mode: S.mode };
+  $('fKm').textContent = (run.dist / 1000).toFixed(2); $('fTime').textContent = fmtTime(run.sec); $('fPace').textContent = fmtPace(run.sec, run.dist);
+  $('fUp').textContent = '…'; $('fDown').textContent = '…'; $('fProf').innerHTML = ''; $('fNote').value = '';
+  document.querySelectorAll('#fRate button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+  const cant = run.sim ? 'Simulationen werden nicht gespeichert.' : run.dist < 100 ? 'Unter 100 m wird der Lauf nicht gespeichert.' : '';
+  $('fHint').textContent = cant; $('fSave').disabled = !!cant;
+  $('finish').hidden = false;
+  runElev(run);
+}
+async function runElev(r) {
+  try {
+    const tr = r.track; if (tr.length < 2) throw 0;
+    const cum = cumulative(tr), sm = sampleRoute(tr, cum, 250, 40), el = await fetchElev(sm.coords);
+    if (run !== r) return;
+    const st = elevStats(el); r.up = st.up; r.down = st.down; r.prof = resample(el, 60).map(v => Math.round(v));
+  } catch (e) {
+    if (run !== r) return;
+    if (S.elev && r.dist > .7 * S.cum[S.cum.length - 1]) { r.up = S.elev.up; r.down = S.elev.down; r.prof = resample(S.elev.el, 60).map(v => Math.round(v)); }
+  }
+  if (run !== r) return;
+  $('fUp').textContent = r.up == null ? '–' : Math.round(r.up); $('fDown').textContent = r.down == null ? '–' : Math.round(r.down); $('fProf').innerHTML = sparkSvg(r.prof);
+}
+$('fSave').onclick = () => {
+  if (!run) return;
+  const thin = resample(run.track, 250).map(p => [+p[0].toFixed(5), +p[1].toFixed(5)]);
+  hist.unshift({ id: run.id, t: run.t, dist: run.dist, sec: run.sec, up: run.up, down: run.down, rating: run.rating, note: $('fNote').value.trim(), prof: run.prof, track: thin, start: run.start, wps: run.wps, end: run.end, mode: run.mode });
+  saveHist(); closeRun(); setTab('hist'); toast('Lauf gespeichert.');
+};
+$('fDiscard').onclick = closeRun;
+function closeRun() { run = null; $('finish').hidden = true; endNav(); }
+
+
+/* ---------- Hintergrund-Betrieb: Display-Sperre, Abdunkeln, stiller Ton ---------- */
+function reqLock() { if (NATIVE) return; try { if (navigator.wakeLock && nav.on) navigator.wakeLock.request('screen').then(l => { nav.lock = l; }).catch(() => {}); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && nav.on) reqLock(); });
+let ka = null;
+function makeSilence() {
+  const sr = 8000, n = sr, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function startKeepAlive() {
+  if (NATIVE) return;
+  try {
+    if (!ka) { ka = new Audio(makeSilence()); ka.loop = true; ka.volume = .05; }
+    ka.play().catch(() => {});
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'Rundlauf: Navigation läuft', artist: 'Sprachführung aktiv' });
+      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.setActionHandler('pause', () => { ka && ka.play().catch(() => {}); });
+      navigator.mediaSession.setActionHandler('play', () => { ka && ka.play().catch(() => {}); });
+    }
+  } catch (e) {}
+}
+function stopKeepAlive() {
+  try { ka && ka.pause(); if ('mediaSession' in navigator) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; } } catch (e) {}
+}
+let dimT = null, lastTap = 0;
+function setDim(on) {
+  $('dim').hidden = !on; clearInterval(dimT);
+  if (on) { const sync = () => { $('dimDist').textContent = $('nDist').textContent; $('dimWhat').textContent = $('nWhat').textContent; }; sync(); dimT = setInterval(sync, 1000); }
+}
+let pinNav = false;
+function seenPin() { return store.get('pinSeen', false); }
+$('btnDim').onclick = () => { if (seenPin()) { setDim(true); reqLock(); } else { pinNav = true; $('pinGo').textContent = 'Verstanden, abdunkeln'; $('pinHelp').hidden = false; } };
+$('btnPinInfo').onclick = () => { pinNav = false; $('pinGo').textContent = 'Schließen'; $('pinHelp').hidden = false; };
+$('pinGo').onclick = () => { $('pinHelp').hidden = true; store.set('pinSeen', true); if (pinNav) { setDim(true); reqLock(); } };
+$('dim').addEventListener('click', () => { const n = Date.now(); if (n - lastTap < 450) setDim(false); lastTap = n; });
+
+/* ---------- Sprache ---------- */
+const voice = { muted: false, v: null };
+function pickVoice() {
+  if (!('speechSynthesis' in window)) return;
+  const vs = speechSynthesis.getVoices();
+  voice.v = vs.find(v => /^de/i.test(v.lang) && /google|enhanced|premium|natural/i.test(v.name)) || vs.find(v => /^de/i.test(v.lang)) || null;
+}
+if ('speechSynthesis' in window) { speechSynthesis.onvoiceschanged = pickVoice; pickVoice(); }
+function say(text, urgent) {
+  $('nWhat').dataset.last = text;
+  if (voice.muted || !('speechSynthesis' in window)) return;
+  try {
+    if (urgent || speechSynthesis.pending) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'de-DE'; if (voice.v) u.voice = voice.v; u.rate = 1.02;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+$('btnMute').onclick = () => {
+  voice.muted = !voice.muted; $('btnMute').textContent = voice.muted ? 'Ton aus' : 'Ton an'; $('btnMute').setAttribute('aria-pressed', String(voice.muted));
+  if (voice.muted && 'speechSynthesis' in window) speechSynthesis.cancel();
+};
+
+/* ---------- Navigation ---------- */
+const nav = {
+  on: false, watch: null, sim: null, progress: 0, base: 0, off: 0, wasOff: false, lastReroute: 0, rerouting: false,
+  follow: true, me: null, acc: null, lastKm: 0, t0: 0, simS: 0, simOff: 0,
+  track: [], dist: 0, lastFix: null, fin: false, arrived: false
+};
+const ARROW = { left: -90, right: 90 };
+function setArrow(delta) {
+  const a = delta == null ? 0 : Math.max(-170, Math.min(170, delta));
+  $('arrowG').setAttribute('transform', `rotate(${a} 24 24)`);
+}
+function roundM(d) { return d < 100 ? Math.max(10, Math.round(d / 10) * 10) : Math.round(d / 50) * 50; }
+
+async function startNav() {
+  if (S.pts.length < 2) return;
+  nav.on = true; nav.progress = 0; nav.base = 0; nav.off = 0; nav.wasOff = false; nav.lastKm = 0; nav.t0 = Date.now(); nav.follow = true;
+  nav.track = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
+  S.instr.forEach(i => { i.a1 = false; i.a2 = false; });
+  $('panel').hidden = true; $('nav').hidden = false; $('recenter').hidden = true; $('banner').classList.remove('off');
+  map.closePopup(); map.dragging.enable();
+  reqLock(); startKeepAlive();
+  say(`Navigation gestartet. Dein Rundkurs ist ${(S.cum[S.cum.length - 1] / 1000).toFixed(1).replace('.', ',')} Kilometer lang.`, true);
+  if (nav.simMode) { startSim(); return; }
+  await startTracking();
+  map.setView(S.start, 17);
+}
+async function startTracking() {
+  if (BG) {
+    try { if (PL.LocalNotifications) await PL.LocalNotifications.requestPermissions(); } catch (e) {}
+    try {
+      nav.bgId = await BG.addWatcher(
+        { backgroundMessage: 'Rundlauf führt dich durch die Strecke.', backgroundTitle: 'Rundlauf läuft', requestPermissions: true, stale: false, distanceFilter: 2 },
+        (loc, err) => {
+          if (err) { if (err.code === 'NOT_AUTHORIZED') { toast('Standort-Berechtigung fehlt. Ich öffne die Einstellungen.', 5000); BG.openSettings(); } return; }
+          onPos([loc.latitude, loc.longitude], loc.accuracy);
+        });
+      return;
+    } catch (e) { toast('Hintergrund-GPS nicht verfügbar, normales GPS wird genutzt.', 4000); }
+  }
+  if (!navigator.geolocation) { toast('Keine Standortbestimmung verfügbar.'); return; }
+  nav.watch = navigator.geolocation.watchPosition(
+    p => onPos([p.coords.latitude, p.coords.longitude], p.coords.accuracy),
+    e => toast(e.code === 1 ? 'Standortzugriff blockiert.' : 'GPS-Signal schwach…', 4000),
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+}
+function stopTracking() {
+  if (nav.watch != null) { navigator.geolocation.clearWatch(nav.watch); nav.watch = null; }
+  if (BG && nav.bgId != null) { try { BG.removeWatcher({ id: nav.bgId }); } catch (e) {} nav.bgId = null; }
+}
+function endNav() {
+  nav.on = false;
+  stopTracking();
+  if (nav.sim) clearInterval(nav.sim); nav.sim = null;
+  try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (nav.me) { map.removeLayer(nav.me); nav.me = null; }
+  if (nav.acc) { map.removeLayer(nav.acc); nav.acc = null; }
+  $('nav').hidden = true; $('panel').hidden = false; $('simRow').hidden = true;
+  document.querySelectorAll('.simtag').forEach(e => e.remove());
+  nav.simMode = false;
+  fit();
+}
+$('btnNav').onclick = () => { nav.simMode = false; startNav(); };
+$('btnStop').onclick = finishRun;
+$('recenter').onclick = () => { nav.follow = true; $('recenter').hidden = true; if (nav.me) map.setView(nav.me.getLatLng(), Math.max(map.getZoom(), 17)); };
+map.on('dragstart', () => { if (nav.on) { nav.follow = false; $('recenter').hidden = false; } });
+
+function onPos(p, acc) {
+  if (!nav.on || nav.arrived) return;
+  if (!nav.me) nav.me = L.marker(p, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), interactive: false, zIndexOffset: 2000 }).addTo(map);
+  nav.me.setLatLng(p);
+  if (acc != null) { if (!nav.acc) nav.acc = L.circle(p, { radius: acc, weight: 0, fillColor: '#1a73e8', fillOpacity: .12, interactive: false }).addTo(map); else nav.acc.setLatLng(p).setRadius(acc); }
+  if (nav.follow) map.setView(p, Math.max(map.getZoom(), 17), { animate: true });
+  if (!nav.lastFix) { nav.track.push([p[0], p[1]]); nav.lastFix = p; }
+  else { const d = hav(nav.lastFix, p); if (d >= 4 && d < 250 && (acc == null || acc <= 40)) { nav.dist += d; nav.track.push([p[0], p[1]]); nav.lastFix = p; } }
+
+  const loc = locate_(p);
+  const thresh = Math.max(35, Math.min(acc || 0, 80));
+  const total = S.cum[S.cum.length - 1];
+  if (loc.dist > thresh) {
+    nav.off++;
+    if (nav.off >= 3 && !nav.rerouting && Date.now() - nav.lastReroute > 20000) {
+      nav.wasOff = true; setOff(true);
+      say('Du bist von der Route abgekommen. Ich berechne eine Alternative.', true);
+      reroute(p, false);
+    }
+    updateNav(p, true);
+    return;
+  }
+  nav.off = 0;
+  if (nav.wasOff && !nav.rerouting) { nav.wasOff = false; setOff(false); say('Du bist wieder auf der Route.'); }
+  nav.progress = Math.max(nav.progress - 30, loc.s);
+  const covered = nav.base + nav.progress;
+  const kmDone = Math.floor(covered / 1000);
+  if (kmDone > nav.lastKm) {
+    nav.lastKm = kmDone;
+    const rest = (total - nav.progress) / 1000;
+    say(`${kmDone} ${kmDone === 1 ? 'Kilometer' : 'Kilometer'} geschafft. Noch ${rest.toFixed(1).replace('.', ',')} Kilometer.`);
+  }
+  // Hinweise
+  const nxt = S.instr.find(i => i.s > nav.progress - 8);
+  if (nxt) {
+    const d = nxt.s - nav.progress;
+    if (d <= 180 && !nxt.a1 && !nxt.a2) { nxt.a1 = true; say(`In ${roundM(d)} Metern ${nxt.text}.`); }
+    if (d <= 35 && !nxt.a2) { nxt.a2 = true; nxt.a1 = true; say(`Jetzt ${nxt.text}.`, true); }
+  }
+  if (total - nav.progress < 25 && covered > Math.min(300, total * .5)) {
+    say(`Ziel erreicht. Gut gemacht! ${(covered / 1000).toFixed(1).replace('.', ',')} Kilometer in ${fmtTime((Date.now() - nav.t0) / 1000)}.`, true);
+    nav.arrived = true;
+    setTimeout(finishRun, 4500); return;
+  }
+  updateNav(p, false);
+}
+function locate_(p) {
+  const win = locateWin(p, nav.progress - 80, nav.progress + 600);
+  return win.dist === Infinity ? locateWin(p, 0, Infinity) : win;
+}
+function locateWin(p, a, b) { return locateOnRoute(S.pts, S.cum, p, a, b); }
+
+function setOff(on) { $('banner').classList.toggle('off', on); }
+function updateNav(p, off) {
+  const total = S.cum[S.cum.length - 1], rest = Math.max(0, total - nav.progress);
+  $('nRest').textContent = (rest / 1000).toFixed(1);
+  $('nTime').textContent = fmtTime(rest / 1000 * S.pace * 60);
+  $('nDone').textContent = ((nav.base + nav.progress) / 1000).toFixed(1);
+  $('nBar').style.width = Math.min(100, (nav.base + nav.progress) / (nav.base + total) * 100) + '%';
+  if (off) { $('nDist').textContent = '!'; $('nWhat').textContent = nav.rerouting ? 'Neue Route wird berechnet…' : 'Abseits der Route'; setArrow(0); return; }
+  const nxt = S.instr.find(i => i.s > nav.progress - 8);
+  if (nxt) { $('nDist').textContent = nxt.s - nav.progress < 1000 ? Math.round((nxt.s - nav.progress) / 10) * 10 + ' m' : ((nxt.s - nav.progress) / 1000).toFixed(1) + ' km'; $('nWhat').textContent = nxt.text[0].toUpperCase() + nxt.text.slice(1); setArrow(nxt.delta > 0 ? Math.min(160, Math.abs(nxt.delta) * 1.0) : -Math.min(160, Math.abs(nxt.delta))); }
+  else { $('nDist').textContent = rest < 1000 ? Math.round(rest / 10) * 10 + ' m' : (rest / 1000).toFixed(1) + ' km'; $('nWhat').textContent = 'Bis zum Ziel dem Weg folgen'; setArrow(0); }
+}
+
+// Alternative: von der aktuellen Position zurück auf die Strecke (weiter vorn) oder direkt zum Start
+async function reroute(p, home) {
+  if (nav.rerouting) return;
+  nav.rerouting = true; nav.lastReroute = Date.now();
+  $('nWhat').textContent = 'Neue Route wird berechnet…';
+  try {
+    const total = S.cum[S.cum.length - 1];
+    let leg, tail = [];
+    if (home) {
+      leg = await routeVia([p, S.pts[0]]);
+    } else {
+      // Kandidat: nächster Punkt der restlichen Strecke, dann ~120 m weiter vorn
+      let bi = -1, bd = Infinity;
+      for (let i = 0; i < S.pts.length; i++) {
+        if (S.cum[i] < nav.progress - 50 || S.cum[i] > nav.progress + 1000) continue;
+        const d = hav(p, S.pts[i]); if (d < bd) { bd = d; bi = i; }
+      }
+      if (bi < 0) bi = Math.min(S.pts.length - 2, S.pts.findIndex(c => true));
+      let ti = bi; while (ti < S.pts.length - 1 && S.cum[ti] - S.cum[bi] < 120) ti++;
+      leg = await routeVia([p, S.pts[ti]]);
+      tail = S.pts.slice(ti + 1);
+    }
+    nav.base += nav.progress;
+    S.pts = densify(leg.concat(tail), 25); S.cum = cumulative(S.pts); S.instr = makeInstructions(S.pts, S.cum);
+    nav.progress = 0; nav.off = 0; nav.wasOff = false;
+    drawRoute(); setOff(false);
+    say(home ? 'Route direkt zum Start berechnet.' : 'Neue Route gefunden. Folge dem Weg zurück auf deine Strecke.', true);
+  } catch (e) {
+    say('Keine Alternative gefunden. Versuche, zur orangefarbenen Linie zurückzukehren.', true);
+    toast('Neuberechnung fehlgeschlagen.', 4000);
+  } finally { nav.rerouting = false; }
+}
+$('btnRejoin').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], false); };
+$('btnHome').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], true); };
+
+/* ---------- Simulation (zum Testen ohne Laufen): in der Adresszeile "demo" suchen ---------- */
+function startSim() {
+  $('simRow').hidden = false;
+  const tag = document.createElement('div'); tag.className = 'simtag'; tag.textContent = 'SIMULATION'; $('nav').appendChild(tag);
+  nav.simS = 0; nav.simOff = 0;
+  nav.sim = setInterval(() => {
+    nav.simS += 18;
+    const total = S.cum[S.cum.length - 1];
+    let p = pointAt(Math.min(nav.simS, total));
+    if (nav.simOff > 0) { nav.simOff--; p = [p[0] + .0009, p[1] + .0009]; }
+    onPos(p, 8);
+    if (nav.simS >= total + 40) clearInterval(nav.sim);
+  }, 1000);
+}
+$('btnOff').onclick = () => { nav.simOff = 8; };
+const _doSearch = doSearch;
+$('btnSearch').onclick = () => { if ($('search').value.trim().toLowerCase() === 'demo') { if (S.pts.length < 2) { toast('Erstelle zuerst eine Route.'); return; } nav.simMode = true; startNav(); } else _doSearch(); };
+$('search').onkeydown = e => { if (e.key === 'Enter') $('btnSearch').click(); };
+
+/* ---------- Start ---------- */
+(function init() {
+  if (NATIVE) { $('btnDim').hidden = true; $('btnPinInfo').hidden = true; }
+  const pl = store.get('plan', null);
+  const b = store.get('base', 'osm'); $('baseSel').value = b; $('baseSel').onchange({ target: $('baseSel') });
+  if (store.get('trail', false)) { $('trailChk').checked = true; trails.addTo(map); }
+  if (pl) { S.pace = pl.pace || 6; S.provider = pl.provider || 'brt'; $('provSel').value = S.provider; }
+  $('paceSel').value = S.pace;
+  setKm(pl && pl.km ? pl.km : 5);
+  setDir(pl && pl.dir != null ? pl.dir : null);
+  applyMode(pl && pl.mode ? pl.mode : 'loop');
+  if (pl && pl.start) {
+    S.start = pl.start; S.wps = pl.wps || []; S.end = pl.end || null; applyMode(pl.mode || 'loop');
+    map.setView(S.start, 14); drawMarkers();
+    if (S.mode === 'p2p' ? S.end : S.wps.length) recompute().then(() => fit());
+  } else {
+    navigator.geolocation && navigator.permissions && navigator.permissions.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') locate(); }).catch(() => {});
+  }
+  updateStats();
+})();
+</script>
+</body>
+</html>

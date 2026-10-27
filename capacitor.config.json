@@ -1,0 +1,8 @@
+{
+  "appId": "de.rundlauf.app",
+  "appName": "Rundlauf",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "android": { "useLegacyBridge": true },
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
