@@ -220,6 +220,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
       <label class="field"><span class="lbl" style="margin:0">Kartenstil</span>
         <select id="baseSel"><option value="osm">Standard</option><option value="topo">Topo (Wanderwege, Höhenlinien)</option><option value="sat">Satellit</option></select></label>
       <label class="row" style="margin-top:10px;gap:10px"><input type="checkbox" id="trailChk"> Markierte Wanderwege einblenden</label>
+      <button class="btn" id="btnVoiceTest" type="button" style="margin-top:10px">Stimme testen</button>
       <button class="btn" id="btnPinInfo" type="button" style="margin-top:10px">Anleitung: Tasche-Modus</button>
       <label class="field"><span class="lbl" style="margin:0">Routing</span>
         <select id="provSel"><option value="brt">BRouter Trekking (bevorzugt Wege)</option><option value="brh">BRouter Wandern</option><option value="osm">OSM Fußweg</option></select></label>
@@ -844,7 +845,7 @@ function finishRun() {
   stopTracking();
   if (nav.sim) clearInterval(nav.sim); nav.sim = null;
   try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  ttsStop();
   run = { id: Date.now(), t: nav.t0, dist: nav.dist, sec: (Date.now() - nav.t0) / 1000, track: nav.track.slice(), sim: !!nav.simMode, rating: null, up: null, down: null, prof: null, start: S.start, wps: S.wps.slice(), end: S.end, mode: S.mode };
   $('fKm').textContent = (run.dist / 1000).toFixed(2); $('fTime').textContent = fmtTime(run.sec); $('fPace').textContent = fmtPace(run.sec, run.dist);
   $('fUp').textContent = '…'; $('fDown').textContent = '…'; $('fProf').innerHTML = ''; $('fNote').value = '';
@@ -910,6 +911,7 @@ function setDim(on) {
   $('dim').hidden = !on; clearInterval(dimT);
   if (on) { const sync = () => { $('dimDist').textContent = $('nDist').textContent; $('dimWhat').textContent = $('nWhat').textContent; }; sync(); dimT = setInterval(sync, 1000); }
 }
+$('btnVoiceTest').onclick = () => { const was = voice.muted; voice.muted = false; say('Hallo! Die Sprachführung funktioniert. In 100 Metern links abbiegen.', true); voice.muted = was; };
 let pinNav = false;
 function seenPin() { return store.get('pinSeen', false); }
 $('btnDim').onclick = () => { if (seenPin()) { setDim(true); reqLock(); } else { pinNav = true; $('pinGo').textContent = 'Verstanden, abdunkeln'; $('pinHelp').hidden = false; } };
@@ -925,9 +927,17 @@ function pickVoice() {
   voice.v = vs.find(v => /^de/i.test(v.lang) && /google|enhanced|premium|natural/i.test(v.name)) || vs.find(v => /^de/i.test(v.lang)) || null;
 }
 if ('speechSynthesis' in window) { speechSynthesis.onvoiceschanged = pickVoice; pickVoice(); }
+function ttsStop() {
+  try { if (NATIVE && PL.TextToSpeech) PL.TextToSpeech.stop().catch(() => {}); else if ('speechSynthesis' in window) speechSynthesis.cancel(); } catch (e) {}
+}
 function say(text, urgent) {
   $('nWhat').dataset.last = text;
-  if (voice.muted || !('speechSynthesis' in window)) return;
+  if (voice.muted) return;
+  if (NATIVE && PL.TextToSpeech) {
+    try { PL.TextToSpeech.speak({ text, lang: 'de-DE', rate: 1.0, pitch: 1.0, volume: 1.0, queueStrategy: urgent ? 0 : 1 }).catch(() => {}); } catch (e) {}
+    return;
+  }
+  if (!('speechSynthesis' in window)) return;
   try {
     if (urgent || speechSynthesis.pending) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -937,7 +947,7 @@ function say(text, urgent) {
 }
 $('btnMute').onclick = () => {
   voice.muted = !voice.muted; $('btnMute').textContent = voice.muted ? 'Ton aus' : 'Ton an'; $('btnMute').setAttribute('aria-pressed', String(voice.muted));
-  if (voice.muted && 'speechSynthesis' in window) speechSynthesis.cancel();
+  if (voice.muted) ttsStop();
 };
 
 /* ---------- Navigation ---------- */
@@ -994,7 +1004,7 @@ function endNav() {
   stopTracking();
   if (nav.sim) clearInterval(nav.sim); nav.sim = null;
   try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  ttsStop();
   if (nav.me) { map.removeLayer(nav.me); nav.me = null; }
   if (nav.acc) { map.removeLayer(nav.acc); nav.acc = null; }
   $('nav').hidden = true; $('panel').hidden = false; $('simRow').hidden = true;
