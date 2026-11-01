@@ -253,7 +253,8 @@ body[data-mode="p2p"] .p2p-only{display:block}
     <div class="row">
       <button class="btn" id="btnDim" type="button">Abdunkeln</button>
       <button class="btn" id="btnMute" type="button" aria-pressed="false">Ton an</button>
-      <button class="btn" id="btnRejoin" type="button">Neu berechnen</button>
+      <button class="btn" id="btnRejoin" type="button">Jetzt neu planen</button>
+      <button class="btn" id="btnAuto" type="button">Neuplanung: automatisch</button>
       <button class="btn" id="btnHome" type="button">Direkt zum Start</button>
       <button class="btn" id="btnStop" type="button" style="margin-left:auto">Beenden</button>
     </div>
@@ -954,7 +955,8 @@ $('btnMute').onclick = () => {
 const nav = {
   on: false, watch: null, sim: null, progress: 0, base: 0, off: 0, wasOff: false, lastReroute: 0, rerouting: false,
   follow: true, me: null, acc: null, lastKm: 0, t0: 0, simS: 0, simOff: 0,
-  track: [], dist: 0, lastFix: null, fin: false, arrived: false
+  track: [], dist: 0, lastFix: null, fin: false, arrived: false,
+  rem: [], goal: null, auto: true, offSince: 0, retries: 0, heading: null, hBuf: [], held: false, orig: null
 };
 const ARROW = { left: -90, right: 90 };
 function setArrow(delta) {
@@ -967,6 +969,8 @@ async function startNav() {
   if (S.pts.length < 2) return;
   nav.on = true; nav.progress = 0; nav.base = 0; nav.off = 0; nav.wasOff = false; nav.lastKm = 0; nav.t0 = Date.now(); nav.follow = true;
   nav.track = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
+  nav.rem = S.wps.map(w => [w[0], w[1]]); nav.goal = (S.mode === 'p2p' && S.end) ? S.end : S.start; nav.auto = true; nav.offSince = 0; nav.retries = 0; nav.heading = null; nav.hBuf = []; nav.held = false;
+  nav.orig = { pts: S.pts, cum: S.cum, instr: S.instr }; $('btnAuto').textContent = 'Neuplanung: automatisch';
   S.instr.forEach(i => { i.a1 = false; i.a2 = false; });
   $('panel').hidden = true; $('nav').hidden = false; $('recenter').hidden = true; $('banner').classList.remove('off');
   map.closePopup(); map.dragging.enable();
@@ -1001,6 +1005,7 @@ function stopTracking() {
 }
 function endNav() {
   nav.on = false;
+  if (nav.orig) { S.pts = nav.orig.pts; S.cum = nav.orig.cum; S.instr = nav.orig.instr; nav.orig = null; if (S.pts.length > 1) drawRoute(); }
   stopTracking();
   if (nav.sim) clearInterval(nav.sim); nav.sim = null;
   try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
@@ -1024,22 +1029,24 @@ function onPos(p, acc) {
   if (acc != null) { if (!nav.acc) nav.acc = L.circle(p, { radius: acc, weight: 0, fillColor: '#1a73e8', fillOpacity: .12, interactive: false }).addTo(map); else nav.acc.setLatLng(p).setRadius(acc); }
   if (nav.follow) map.setView(p, Math.max(map.getZoom(), 17), { animate: true });
   if (!nav.lastFix) { nav.track.push([p[0], p[1]]); nav.lastFix = p; }
-  else { const d = hav(nav.lastFix, p); if (d >= 4 && d < 250 && (acc == null || acc <= 40)) { nav.dist += d; nav.track.push([p[0], p[1]]); nav.lastFix = p; } }
+  else { const d = hav(nav.lastFix, p); if (d >= 4 && d < 250 && (acc == null || acc <= 40)) { nav.dist += d; nav.track.push([p[0], p[1]]); nav.lastFix = p;
+    nav.hBuf.push(p); if (nav.hBuf.length > 8) nav.hBuf.shift();
+    if (hav(nav.hBuf[0], p) >= 15) nav.heading = brg(nav.hBuf[0], p); } }
+  nav.rem = nav.rem.filter(w => hav(w, p) > 40);
 
   const loc = locate_(p);
-  const thresh = Math.max(35, Math.min(acc || 0, 80));
+  const thresh = Math.max(45, Math.min((acc || 0) * 1.5, 90));
   const total = S.cum[S.cum.length - 1];
   if (loc.dist > thresh) {
-    nav.off++;
-    if (nav.off >= 3 && !nav.rerouting && Date.now() - nav.lastReroute > 20000) {
-      nav.wasOff = true; setOff(true);
-      say('Du bist von der Route abgekommen. Ich berechne eine Alternative.', true);
-      reroute(p, false);
+    if (!nav.offSince) nav.offSince = Date.now();
+    if (nav.auto && Date.now() - nav.offSince > 12000 && !nav.rerouting && Date.now() - nav.lastReroute > 25000) {
+      if (!nav.wasOff) { nav.wasOff = true; setOff(true); say('Du bist von der Route abgekommen. Ich plane von hier aus neu.', true); }
+      reroute(p, 'smart');
     }
     updateNav(p, true);
     return;
   }
-  nav.off = 0;
+  nav.offSince = 0; nav.retries = 0;
   if (nav.wasOff && !nav.rerouting) { nav.wasOff = false; setOff(false); say('Du bist wieder auf der Route.'); }
   nav.progress = Math.max(nav.progress - 30, loc.s);
   const covered = nav.base + nav.progress;
@@ -1076,46 +1083,51 @@ function updateNav(p, off) {
   $('nTime').textContent = fmtTime(rest / 1000 * S.pace * 60);
   $('nDone').textContent = ((nav.base + nav.progress) / 1000).toFixed(1);
   $('nBar').style.width = Math.min(100, (nav.base + nav.progress) / (nav.base + total) * 100) + '%';
-  if (off) { $('nDist').textContent = '!'; $('nWhat').textContent = nav.rerouting ? 'Neue Route wird berechnet…' : 'Abseits der Route'; setArrow(0); return; }
+  if (off) { $('nDist').textContent = '!'; $('nWhat').textContent = nav.rerouting ? 'Neue Route wird berechnet…' : (nav.auto ? 'Abseits der Route' : 'Eigener Weg, Neuplanung aus'); setArrow(0); return; }
   const nxt = S.instr.find(i => i.s > nav.progress - 8);
   if (nxt) { $('nDist').textContent = nxt.s - nav.progress < 1000 ? Math.round((nxt.s - nav.progress) / 10) * 10 + ' m' : ((nxt.s - nav.progress) / 1000).toFixed(1) + ' km'; $('nWhat').textContent = nxt.text[0].toUpperCase() + nxt.text.slice(1); setArrow(nxt.delta > 0 ? Math.min(160, Math.abs(nxt.delta) * 1.0) : -Math.min(160, Math.abs(nxt.delta))); }
   else { $('nDist').textContent = rest < 1000 ? Math.round(rest / 10) * 10 + ' m' : (rest / 1000).toFixed(1) + ' km'; $('nWhat').textContent = 'Bis zum Ziel dem Weg folgen'; setArrow(0); }
 }
 
-// Alternative: von der aktuellen Position zurück auf die Strecke (weiter vorn) oder direkt zum Start
-async function reroute(p, home) {
+// Neuplanung vom aktuellen Standort zum Ziel (über die noch offenen Wegpunkte), nicht zurück zur alten Linie
+async function reroute(p, mode) {
   if (nav.rerouting) return;
   nav.rerouting = true; nav.lastReroute = Date.now();
   $('nWhat').textContent = 'Neue Route wird berechnet…';
   try {
-    const total = S.cum[S.cum.length - 1];
-    let leg, tail = [];
-    if (home) {
-      leg = await routeVia([p, S.pts[0]]);
-    } else {
-      // Kandidat: nächster Punkt der restlichen Strecke, dann ~120 m weiter vorn
-      let bi = -1, bd = Infinity;
-      for (let i = 0; i < S.pts.length; i++) {
-        if (S.cum[i] < nav.progress - 50 || S.cum[i] > nav.progress + 1000) continue;
-        const d = hav(p, S.pts[i]); if (d < bd) { bd = d; bi = i; }
+    let list;
+    if (mode === 'home') list = [p, S.start];
+    else {
+      const hd = nav.heading;
+      if (hd != null && mode === 'smart') {
+        // Wegpunkte, die hinter deiner Laufrichtung liegen, gelten als übersprungen
+        nav.rem = nav.rem.filter(w => Math.abs(((brg(p, w) - hd + 540) % 360) - 180) <= 100 || hav(p, w) <= 60);
       }
-      if (bi < 0) bi = Math.min(S.pts.length - 2, S.pts.findIndex(c => true));
-      let ti = bi; while (ti < S.pts.length - 1 && S.cum[ti] - S.cum[bi] < 120) ti++;
-      leg = await routeVia([p, S.pts[ti]]);
-      tail = S.pts.slice(ti + 1);
+      list = [p, ...nav.rem, nav.goal];
+    }
+    const leg = await routeVia(list);
+    if (mode === 'smart' && nav.heading != null && nav.retries < 3) {
+      const c = cumulative(leg); let k = 1; while (k < leg.length - 1 && c[k] < 50) k++;
+      const diff = Math.abs(((brg(leg[0], leg[k]) - nav.heading + 540) % 360) - 180);
+      if (diff > 110) {
+        nav.retries++;
+        if (!nav.held) { nav.held = true; say('Weiter in deine Richtung. Ich plane neu, sobald sich ein Weg ergibt.'); }
+        return;
+      }
     }
     nav.base += nav.progress;
-    S.pts = densify(leg.concat(tail), 25); S.cum = cumulative(S.pts); S.instr = makeInstructions(S.pts, S.cum);
-    nav.progress = 0; nav.off = 0; nav.wasOff = false;
+    S.pts = densify(leg, 25); S.cum = cumulative(S.pts); S.instr = makeInstructions(S.pts, S.cum);
+    nav.progress = 0; nav.offSince = 0; nav.retries = 0; nav.wasOff = false; nav.held = false;
     drawRoute(); setOff(false);
-    say(home ? 'Route direkt zum Start berechnet.' : 'Neue Route gefunden. Folge dem Weg zurück auf deine Strecke.', true);
+    say(mode === 'home' ? 'Route direkt zum Start berechnet.' : 'Neue Route berechnet. Ich führe dich von hier aus weiter.', true);
   } catch (e) {
-    say('Keine Alternative gefunden. Versuche, zur orangefarbenen Linie zurückzukehren.', true);
+    say('Neuberechnung nicht möglich. Folge weiter deinem Weg.', true);
     toast('Neuberechnung fehlgeschlagen.', 4000);
   } finally { nav.rerouting = false; }
 }
-$('btnRejoin').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], false); };
-$('btnHome').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], true); };
+$('btnRejoin').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], 'manual'); };
+$('btnHome').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], 'home'); };
+$('btnAuto').onclick = () => { nav.auto = !nav.auto; $('btnAuto').textContent = nav.auto ? 'Neuplanung: automatisch' : 'Neuplanung: aus'; if (nav.auto) nav.offSince = 0; };
 
 /* ---------- Simulation (zum Testen ohne Laufen): in der Adresszeile "demo" suchen ---------- */
 function startSim() {
@@ -1131,7 +1143,7 @@ function startSim() {
     if (nav.simS >= total + 40) clearInterval(nav.sim);
   }, 1000);
 }
-$('btnOff').onclick = () => { nav.simOff = 8; };
+$('btnOff').onclick = () => { nav.simOff = 25; };
 const _doSearch = doSearch;
 $('btnSearch').onclick = () => { if ($('search').value.trim().toLowerCase() === 'demo') { if (S.pts.length < 2) { toast('Erstelle zuerst eine Route.'); return; } nav.simMode = true; startNav(); } else _doSearch(); };
 $('search').onkeydown = e => { if (e.key === 'Enter') $('btnSearch').click(); };
