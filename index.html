@@ -123,6 +123,20 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
 body[data-mode="p2p"] .loop-only{display:none!important}
 .p2p-only{display:none}
 body[data-mode="p2p"] .p2p-only{display:block}
+#sos{position:absolute;pointer-events:auto;left:max(12px,env(safe-area-inset-left,0px));bottom:200px;width:58px;height:58px;border-radius:50%;background:var(--danger);color:#fff;border:3px solid #fff;font:700 18px/1 var(--font-num);box-shadow:var(--shadow);touch-action:none;user-select:none;-webkit-user-select:none}
+#sos.hold{transform:scale(.9);filter:brightness(1.3)}
+#sosDot{position:absolute;pointer-events:auto;top:max(8px,env(safe-area-inset-top,0px));left:8px;width:22px;height:22px;border-radius:50%;background:#666;opacity:.55;z-index:5}
+.overlay{position:absolute;z-index:1500;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;text-align:center}
+#alarm{background:#b71c1c;color:#fff}
+#alarm h2{margin:0;font:700 34px/1.1 var(--font-num);text-transform:uppercase}
+#alarmCount{font:700 120px/1 var(--font-num)}
+.big{width:100%;max-width:420px;min-height:88px;border-radius:16px;border:3px solid #fff;font:700 28px/1.1 var(--font-num);background:#fff;color:#111}
+#airAsk{position:absolute;z-index:1400;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;box-shadow:var(--shadow);padding:16px max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:10px}
+#airAsk .big{border-color:var(--line);background:var(--forest);color:var(--forest-ink);max-width:none}
+#airAsk .big.alt{background:var(--soft);color:var(--ink)}
+.ctcs{display:grid;gap:8px;margin-top:10px}
+.setgrid{display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;margin-top:10px}
+.setgrid input{width:100%;box-sizing:border-box}
 @media (min-width:900px){
   .modal{place-items:center}.sheet{border-radius:18px}
   #panel{left:12px;right:auto;top:12px;bottom:12px;width:372px;max-height:none;border-radius:18px;padding-bottom:0}
@@ -220,11 +234,39 @@ body[data-mode="p2p"] .p2p-only{display:block}
       <label class="field"><span class="lbl" style="margin:0">Kartenstil</span>
         <select id="baseSel"><option value="osm">Standard</option><option value="topo">Topo (Wanderwege, Höhenlinien)</option><option value="sat">Satellit</option></select></label>
       <label class="row" style="margin-top:10px;gap:10px"><input type="checkbox" id="trailChk"> Markierte Wanderwege einblenden</label>
+      <div class="lbl" style="margin-top:14px">Offline-Karte</div>
+      <label class="row" style="gap:10px"><input type="checkbox" id="setAutoTiles"> Karte beim Start der Navigation speichern</label>
+      <label class="row" style="gap:10px;margin-top:6px"><input type="checkbox" id="setClearTiles"> Gespeicherte Karte nach dem Lauf löschen</label>
+      <label class="field"><span class="lbl" style="margin:0">Streifen links und rechts der Strecke</span>
+        <select id="setTileKm"><option value="1.5">1,5 km</option><option value="2">2 km</option></select></label>
+      <div class="row" style="margin-top:8px"><button class="btn" id="btnTilesPlan" type="button">Karte für diese Strecke speichern</button><button class="btn" id="btnTileClear" type="button">Löschen</button></div>
+      <div class="hint" id="tileInfo"></div>
       <button class="btn" id="btnVoiceTest" type="button" style="margin-top:10px">Stimme testen</button>
       <button class="btn" id="btnPinInfo" type="button" style="margin-top:10px">Anleitung: Tasche-Modus</button>
       <label class="field"><span class="lbl" style="margin:0">Routing</span>
         <select id="provSel"><option value="brt">BRouter Trekking (bevorzugt Wege)</option><option value="brh">BRouter Wandern</option><option value="osm">OSM Fußweg</option></select></label>
       <div class="hint" style="margin-top:6px">Schlägt ein Dienst fehl, probiert die App automatisch die anderen.</div>
+    </details>
+
+    <details>
+      <summary>Sicherheit und Notfall</summary>
+      <label class="row" style="gap:10px;margin-top:10px"><input type="checkbox" id="setSafety"> Sicherheitsalarm aktiv (Stillstand und Zeitüberschreitung)</label>
+      <div class="lbl" style="margin-top:12px">Notfallkontakte (Handynummern)</div>
+      <div class="ctcs">
+        <input type="text" id="ctc1" inputmode="tel" placeholder="Kontakt 1, z. B. +491701234567" aria-label="Kontakt 1">
+        <input type="text" id="ctc2" inputmode="tel" placeholder="Kontakt 2" aria-label="Kontakt 2">
+        <input type="text" id="ctc3" inputmode="tel" placeholder="Kontakt 3" aria-label="Kontakt 3">
+      </div>
+      <div class="setgrid">
+        <label for="setStill">Stillstand ab (Minuten)</label><input type="text" id="setStill" inputmode="decimal">
+        <label for="setOver">Zeit über Plan (Minuten)</label><input type="text" id="setOver" inputmode="decimal">
+        <label for="setCd">Countdown (Sekunden)</label><input type="text" id="setCd" inputmode="decimal">
+        <label for="setSilent">Stiller Alarm (Sekunden)</label><input type="text" id="setSilent" inputmode="decimal">
+        <label for="setRepeat">Update-SMS alle (Minuten)</label><input type="text" id="setRepeat" inputmode="decimal">
+        <label for="setPin">PIN zum Abbrechen</label><input type="text" id="setPin" inputmode="numeric" placeholder="4 bis 8 Ziffern">
+      </div>
+      <button class="btn" id="btnSmsTest" type="button" style="margin-top:10px">Test-SMS an Kontakt 1</button>
+      <div class="hint" style="margin-top:6px">Die App ersetzt keinen Notruf. Im Ernstfall 112 (Rettung) oder 110 (Polizei) wählen. SMS gehen nur mit Mobilfunk raus und werden dann nachgesendet. Beim ersten Senden fragt Android nach der SMS-Erlaubnis. Teste alle Funktionen vor dem ersten Einsatz. Der stille Notfallknopf (SOS, 1,5 Sekunden gedrückt halten) braucht gesetzte Kontakte und am besten eine PIN.</div>
     </details>
 
     <button class="btn go" id="btnNav" type="button" disabled>Navigation starten</button>
@@ -242,6 +284,8 @@ body[data-mode="p2p"] .p2p-only{display:block}
     <svg id="arrow" viewBox="0 0 48 48" aria-hidden="true"><g id="arrowG" transform-origin="24 24"><path d="M24 4 L38 22 H29 V44 H19 V22 H10 Z" fill="currentColor"/></g></svg>
     <div><div class="dist" id="nDist">–</div><div class="what" id="nWhat">Start…</div></div>
   </div>
+  <button id="sos" type="button" hidden aria-label="Stiller Notfallknopf, 1,5 Sekunden gedrückt halten">SOS</button>
+  <div id="sosDot" hidden role="button" aria-label="Alarm aktiv"></div>
   <button class="btn" id="recenter" type="button" hidden>Zentrieren</button>
   <div id="navbar">
     <div class="stats">
@@ -252,6 +296,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
     <div class="bar"><i id="nBar"></i></div>
     <div class="row">
       <button class="btn" id="btnDim" type="button">Abdunkeln</button>
+      <button class="btn" id="btnTiles" type="button">Karte speichern</button>
       <button class="btn" id="btnMute" type="button" aria-pressed="false">Ton an</button>
       <button class="btn" id="btnRejoin" type="button">Jetzt neu planen</button>
       <button class="btn" id="btnAuto" type="button">Neuplanung: automatisch</button>
@@ -301,6 +346,26 @@ body[data-mode="p2p"] .p2p-only{display:block}
   <div id="dimDist" style="font:700 64px/1 var(--font-num)"></div>
   <div id="dimWhat" style="font:600 22px/1.2 var(--font-ui)"></div>
   <div style="font-size:13px;margin-top:40px;color:#333">Navigation läuft. Zum Aufhellen zweimal tippen.</div>
+</div>
+<div id="airAsk" hidden role="dialog" aria-label="Kein Netz">
+  <div style="font:700 22px/1.2 var(--font-num)">Kein Netz für die Neuplanung</div>
+  <button class="big" id="airGoal" type="button">Weiter zum Ziel</button>
+  <button class="big alt" id="airBack" type="button">Zurück auf die Strecke</button>
+  <div class="hint">Ohne Antwort führe ich dich in Luftlinie zum Ziel.</div>
+</div>
+<div id="alarm" class="overlay" hidden role="alertdialog" aria-labelledby="alarmTitle">
+  <h2 id="alarmTitle">Alarm</h2>
+  <div id="alarmSub" style="font-size:20px">Notsignal an deine Kontakte in</div>
+  <div id="alarmCount">30</div>
+  <button class="big" id="alarmOk" type="button">Mir geht's gut</button>
+</div>
+<div class="modal" id="pinAsk" hidden style="z-index:1600">
+  <div class="sheet" role="dialog" aria-label="PIN">
+    <h2>PIN eingeben</h2>
+    <input type="password" id="pinIn" inputmode="numeric" autocomplete="off" aria-label="PIN">
+    <div class="hint" id="pinMsg"></div>
+    <div class="row"><button class="btn go" id="pinOk" type="button" style="flex:1">Alarm beenden</button><button class="btn" id="pinNo" type="button">Zurück</button></div>
+  </div>
 </div>
 <div id="toast" role="status" hidden></div>
 
@@ -439,9 +504,28 @@ function toast(msg, ms = 3500) {
 /* ---------- Karte ---------- */
 const map = L.map('map', { zoomControl: false }).setView([51.16, 10.45], 6);
 L.control.zoom({ position: 'topright' }).addTo(map);
+const rawFetch = (window.CapacitorWebFetch || window.fetch).bind(window);
+const TILE_CACHE = 'rundlauf-tiles-v1';
+const CachedTiles = L.TileLayer.extend({
+  createTile(coords, done) {
+    const tile = document.createElement('img'); tile.alt = ''; tile.setAttribute('role', 'presentation');
+    const url = this.getTileUrl(coords);
+    const net = () => { tile.onload = () => done(null, tile); tile.onerror = e => done(e, tile); tile.src = url; };
+    if (!('caches' in window)) { net(); return tile; }
+    caches.open(TILE_CACHE).then(c => c.match(url)).then(r => r ? r.blob() : null).then(b => {
+      if (b && b.size) {
+        const u = URL.createObjectURL(b);
+        tile.onload = () => { URL.revokeObjectURL(u); done(null, tile); };
+        tile.onerror = e => { URL.revokeObjectURL(u); done(e, tile); };
+        tile.src = u;
+      } else net();
+    }).catch(net);
+    return tile;
+  }
+});
 const base = {
-  osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap-Mitwirkende' }),
-  topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenStreetMap, SRTM | OpenTopoMap (CC-BY-SA)' }),
+  osm: new CachedTiles('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap-Mitwirkende' }),
+  topo: new CachedTiles('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { subdomains: ['a'], maxZoom: 17, attribution: '© OpenStreetMap, SRTM | OpenTopoMap (CC-BY-SA)' }),
   sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' })
 };
 const trails = L.tileLayer('https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png', { maxZoom: 18, opacity: .85, attribution: '© waymarkedtrails.org' });
@@ -951,12 +1035,271 @@ $('btnMute').onclick = () => {
   if (voice.muted) ttsStop();
 };
 
+/* ---------- Einstellungen ---------- */
+const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true }, store.get('settings', {}));
+function saveSet() { store.set('settings', SET); }
+(function bindSettings() {
+  const num = (id, key, min, max) => { const e = $(id); e.value = SET[key]; e.onchange = () => { let v = parseFloat(String(e.value).replace(',', '.')); if (!(v >= min)) v = SET[key]; SET[key] = Math.min(max, v); e.value = SET[key]; saveSet(); }; };
+  const chk = (id, key) => { const e = $(id); e.checked = !!SET[key]; e.onchange = () => { SET[key] = e.checked; saveSet(); }; };
+  chk('setSafety', 'safety'); chk('setAutoTiles', 'autoTiles'); chk('setClearTiles', 'clearTiles');
+  num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
+  [1, 2, 3].forEach(i => { const e = $('ctc' + i); e.value = SET.contacts[i - 1] || ''; e.onchange = () => { SET.contacts[i - 1] = e.value.trim().replace(/[^\d+]/g, ''); e.value = SET.contacts[i - 1]; saveSet(); }; });
+  const pin = $('setPin'); pin.value = SET.pin; pin.onchange = () => { SET.pin = pin.value.replace(/\D/g, '').slice(0, 8); pin.value = SET.pin; saveSet(); };
+  const tk = $('setTileKm'); tk.value = String(SET.tileKm); tk.onchange = () => { SET.tileKm = +tk.value; saveSet(); };
+})();
+
+/* ---------- Offline-Karte ---------- */
+//#PURE3-START
+function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * 2 ** z); }
+function lat2y(lat, z) { const r = rad(lat); return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z); }
+function corridorTiles(pts, bufM, zooms, out) {
+  out = out || new Map();
+  const sample = []; let last = null;
+  for (const p of pts) { if (!last || hav(last, p) >= 120) { sample.push(p); last = p; } }
+  if (pts.length) sample.push(pts[pts.length - 1]);
+  for (const z of zooms) for (const p of sample) {
+    const dLat = bufM / 111320, dLon = bufM / (111320 * Math.cos(rad(p[0])));
+    const x0 = lon2x(p[1] - dLon, z), x1 = lon2x(p[1] + dLon, z);
+    const y0 = lat2y(Math.min(85, p[0] + dLat), z), y1 = lat2y(Math.max(-85, p[0] - dLat), z);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) out.set(z + '/' + x + '/' + y, [z, x, y]);
+  }
+  return out;
+}
+function capTiles(map, max) {
+  let arr = [...map.values()];
+  while (arr.length > max) { const mz = Math.max(...arr.map(t => t[0])); if (mz <= 12) break; arr = arr.filter(t => t[0] < mz); }
+  return arr;
+}
+const fillTpl = (tpl, t) => tpl.replace('{s}', 'a').replace('{z}', t[0]).replace('{x}', t[1]).replace('{y}', t[2]).replace('{r}', '');
+//#PURE3-END
+let tilesJob = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function routeSet() { return S.pts.length > 1 ? [{ pts: S.pts, buf: SET.tileKm * 1000 }] : []; }
+async function updateTileInfo() {
+  try { const c = await caches.open(TILE_CACHE); const k = await c.keys(); $('tileInfo').textContent = k.length ? `${k.length} Kacheln gespeichert (ca. ${(k.length * 25 / 1024).toFixed(1)} MB)` : 'Keine Kacheln gespeichert'; }
+  catch (e) { $('tileInfo').textContent = ''; }
+}
+async function clearTiles() { try { await caches.delete(TILE_CACHE); } catch (e) {} store.set('tilesAt', 0); updateTileInfo(); }
+async function saveTiles(sets, auto) {
+  if (tilesJob || !sets.length) return;
+  if (!('caches' in window)) { if (!auto) toast('Offline-Speicher nicht verfügbar.'); return; }
+  const key = $('baseSel').value;
+  if (key === 'sat') { if (!auto) toast('Satellitenbilder werden nicht gespeichert. Wähle Standard oder Topo.', 5000); return; }
+  if (!navigator.onLine) { if (!auto) toast('Kein Netz: Die Karte kann gerade nicht gespeichert werden.', 5000); return; }
+  const tpl = base[key]._url, m = new Map();
+  sets.forEach(x => corridorTiles(x.pts, x.buf, [12, 13, 14, 15, 16], m));
+  const tiles = capTiles(m, 3000);
+  tilesJob = true;
+  if (!auto) toast(`Speichere ${tiles.length} Kacheln…`, 3000);
+  let done = 0, fail = 0, added = 0;
+  try {
+    const cache = await caches.open(TILE_CACHE);
+    for (const t of tiles) {
+      const url = fillTpl(tpl, t);
+      try {
+        if (!(await cache.match(url))) { const r = await rawFetch(url); if (!r.ok) throw new Error('http ' + r.status); await cache.put(url, r); added++; await sleep(110); }
+        fail = 0;
+      } catch (e) { fail++; if (fail >= 6) throw new Error('abort'); }
+      done++;
+      if (done % 40 === 0) $('tileInfo').textContent = `Speichere ${done}/${tiles.length}…`;
+    }
+    store.set('tilesAt', Date.now());
+    if (!auto || added) toast(`Karte gespeichert: ${tiles.length} Kacheln.`, 3500);
+  } catch (e) { toast('Karte speichern abgebrochen (kein Netz oder der Kartenserver lehnt ab).', 5000); }
+  finally { tilesJob = false; updateTileInfo(); }
+}
+$('btnTilesPlan').onclick = () => { if (!routeSet().length) { toast('Plane zuerst eine Strecke.'); return; } saveTiles(routeSet(), false); };
+$('btnTiles').onclick = () => { const sets = routeSet(); if (nav.lastPos) sets.push({ pts: [nav.lastPos.p], buf: 2000 }); saveTiles(sets, false); };
+$('btnTileClear').onclick = clearTiles;
+(function () { updateTileInfo(); const ta = store.get('tilesAt', 0); if (ta && Date.now() - ta > 3 * 864e5) clearTiles(); })();
+
+/* ---------- Luftlinie ohne Netz ---------- */
+const DIRN8 = ['Norden', 'Nordosten', 'Osten', 'Südosten', 'Süden', 'Südwesten', 'Westen', 'Nordwesten'];
+const dirName8 = b => DIRN8[Math.round(b / 45) % 8];
+const fmtKm = m => (m / 1000).toFixed(1).replace('.', ',');
+let airTimer = null;
+function hideAsk() { clearTimeout(airTimer); $('airAsk').hidden = true; }
+function enterAir() {
+  if (nav.air || !nav.on) return;
+  nav.air = { mode: 'goal', lastD: null, lastSayT: 0 };
+  nav.wasOff = true; setOff(true);
+  $('airAsk').hidden = false;
+  say('Kein Netz für die Neuplanung. Zum Ziel weiterlaufen oder zurück auf die Strecke? Ohne Antwort führe ich dich zum Ziel.', true);
+  airTimer = setTimeout(() => { if (!$('airAsk').hidden) { hideAsk(); say('Ich führe dich in Luftlinie zum Ziel.'); } }, 12000);
+}
+function exitAir(msg) { if (!nav.air) return; nav.air = null; hideAsk(); nav.wasOff = false; setOff(false); if (msg) say(msg, true); }
+$('airGoal').onclick = () => { if (nav.air) nav.air.mode = 'goal'; hideAsk(); say('Ich führe dich in Luftlinie zum Ziel.', true); };
+$('airBack').onclick = () => { if (nav.air) nav.air.mode = 'back'; hideAsk(); say('Ich führe dich zurück auf die Strecke.', true); };
+function airTarget(p) {
+  if (nav.air.mode === 'back') { const l = locateOnRoute(S.pts, S.cum, p, 0, Infinity); return pointAt(l.s); }
+  return nav.goal;
+}
+function updateAir(p) {
+  const a = nav.air; if (!a) return;
+  const t = airTarget(p), d = hav(p, t), b = brg(p, t);
+  if (a.mode === 'goal' && d < 30) { nav.arrived = true; say('Ziel erreicht. Gut gemacht!', true); setTimeout(finishRun, 4500); return; }
+  $('nDist').textContent = d < 1000 ? Math.round(d / 10) * 10 + ' m' : fmtKm(d) + ' km';
+  $('nWhat').textContent = (a.mode === 'goal' ? 'Luftlinie zum Ziel, ' : 'Zurück zur Strecke, ') + dirName8(b);
+  setArrow(nav.heading != null ? ((b - nav.heading + 540) % 360) - 180 : (b > 180 ? b - 360 : b));
+  const now = Date.now();
+  if (a.lastD == null || Math.abs(a.lastD - d) >= 250 || now - a.lastSayT > 90000) { a.lastD = d; a.lastSayT = now; say(`Noch ${fmtKm(d)} Kilometer Luftlinie, Richtung ${dirName8(b)}.`); }
+}
+
+/* ---------- Sicherheit: Alarm, SMS, stiller Notfallknopf ---------- */
+const sos = { alarm: null, emerg: null, tick: null, cd: null };
+let outbox = store.get('outbox', []), flushing = false, lastFlushFail = 0, smsWarned = false;
+const saveOutbox = () => store.set('outbox', outbox);
+const SMSP = () => (NATIVE && PL.RundlaufSms) || null;
+function posText() {
+  const lp = nav.lastPos || store.get('lastPos', null);
+  if (!lp) return 'Position unbekannt.';
+  const d = new Date(lp.t), hh = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  return `Position (${hh}${lp.acc ? ', +-' + Math.round(lp.acc) + ' m' : ''}): https://maps.google.com/?q=${lp.p[0].toFixed(5)},${lp.p[1].toFixed(5)}`;
+}
+function smsText(kind, reason) {
+  const pos = posText();
+  if (kind === 'sos') return 'NOTFALL: Ich brauche Hilfe. ' + pos;
+  if (kind === 'still') return 'ALARM von Rundlauf: Keine Bewegung seit mehreren Minuten und keine Rueckmeldung. Bitte melden oder nachsehen. ' + pos;
+  if (kind === 'over') return 'ALARM von Rundlauf: Geplante Laufzeit deutlich ueberschritten und keine Rueckmeldung. Bitte melden oder nachsehen. ' + pos;
+  if (kind === 'update') return 'Update (Alarm weiter aktiv): ' + pos;
+  if (kind === 'clear') return 'Entwarnung von Rundlauf: ' + (reason || 'Alles in Ordnung') + '. ' + pos;
+  return 'Rundlauf Testnachricht: Die Notfall-SMS funktioniert. ' + pos;
+}
+function queueSms(kind, reason) {
+  const nums = (kind === 'test' ? [SET.contacts[0]] : SET.contacts).filter(Boolean);
+  if (!nums.length) { toast('Keine Notfallkontakte hinterlegt (Sicherheit und Notfall).', 6000); return false; }
+  if (kind === 'update') outbox = outbox.filter(m => m.kind !== 'update');
+  const text = smsText(kind, reason);
+  nums.forEach(to => outbox.push({ id: Date.now() + Math.random(), to, text, kind, tries: 0 }));
+  saveOutbox(); lastFlushFail = 0; flushOutbox();
+  return true;
+}
+async function flushOutbox() {
+  if (flushing || !outbox.length) return;
+  const sms = SMSP();
+  if (!sms) { if (!smsWarned) { smsWarned = true; toast('SMS-Versand funktioniert nur in der Android-App.', 5000); } return; }
+  if (Date.now() - lastFlushFail < 25000) return;
+  flushing = true;
+  try {
+    while (outbox.length) {
+      const m = outbox[0];
+      try {
+        await sms.send({ to: m.to, text: m.text });
+        outbox = outbox.filter(x => x.id !== m.id); saveOutbox();
+        if (sos.emerg && m.kind !== 'clear' && m.kind !== 'test') sos.emerg.sentAny = true;
+        if (m.kind === 'test') toast('Test-SMS wurde an Android übergeben.', 4000);
+      } catch (e) {
+        m.tries = (m.tries || 0) + 1; lastFlushFail = Date.now(); saveOutbox();
+        if (/Berechtigung/i.test(String(e && (e.message || e)))) toast('SMS-Erlaubnis fehlt. Erlaube SMS in den Android-Einstellungen für Rundlauf.', 6000);
+        break;
+      }
+    }
+  } finally { flushing = false; }
+}
+setInterval(flushOutbox, 30000);
+$('btnSmsTest').onclick = () => { queueSms('test'); };
+
+let beepCtx = null, beepT = null;
+function startBeep() {
+  try {
+    beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)(); if (beepCtx.resume) beepCtx.resume();
+    const b = () => { const o = beepCtx.createOscillator(), g = beepCtx.createGain(); o.type = 'square'; o.frequency.value = 880; g.gain.value = .6; o.connect(g); g.connect(beepCtx.destination); o.start(); o.stop(beepCtx.currentTime + .35); };
+    b(); clearInterval(beepT); beepT = setInterval(b, 700);
+  } catch (e) {}
+}
+function stopBeep() { clearInterval(beepT); beepT = null; }
+function notifyAlarm() {
+  try { if (PL.LocalNotifications) PL.LocalNotifications.schedule({ notifications: [{ id: 911, title: 'Rundlauf Alarm', body: 'Bist du in Ordnung? App öffnen und "Mir geht\'s gut" tippen.', schedule: { at: new Date(Date.now() + 400) } }] }); } catch (e) {}
+}
+function showDot() { $('sosDot').hidden = !((sos.alarm && sos.alarm.silent) || (sos.emerg && sos.emerg.silent)); }
+function closeAlarm() { clearInterval(sos.cd); sos.cd = null; sos.alarm = null; stopBeep(); $('alarm').hidden = true; showDot(); }
+function raiseAlarm(kind, opt) {
+  if (sos.alarm || sos.emerg || !nav.on) return;
+  const silent = !!(opt && opt.silent);
+  sos.alarm = { kind, silent, end: Date.now() + (silent ? SET.silentSec : SET.cdSec) * 1000, lastSay: 0, lastVib: 0 };
+  clearInterval(sos.cd); sos.cd = setInterval(() => alarmTick(Date.now()), 1000);
+  if (silent) { showDot(); return; }
+  $('alarmTitle').textContent = kind === 'still' ? 'Keine Bewegung erkannt' : 'Geplante Zeit überschritten';
+  $('alarmSub').textContent = 'Notsignal an deine Kontakte in';
+  $('alarmCount').hidden = false; $('alarmOk').textContent = "Mir geht's gut"; $('alarm').hidden = false;
+  startBeep(); notifyAlarm(); alarmTick(Date.now());
+}
+function alarmTick(now) {
+  const a = sos.alarm; if (!a) return;
+  const rem = Math.max(0, Math.ceil((a.end - now) / 1000));
+  if (!a.silent) {
+    $('alarmCount').textContent = rem;
+    if (now - a.lastVib > 2000) { a.lastVib = now; try { navigator.vibrate && navigator.vibrate([600, 200, 600]); } catch (e) {} }
+    if (now - a.lastSay > 10000) { a.lastSay = now; say(`Alarm. Notsignal in ${rem} Sekunden. Tippe auf Mir geht es gut.`, true); }
+  }
+  if (rem <= 0) fireEmergency(a);
+}
+function fireEmergency(a) {
+  clearInterval(sos.cd); sos.cd = null; sos.alarm = null; stopBeep();
+  sos.emerg = { kind: a.silent ? 'sos' : a.kind, silent: a.silent, nextAt: Date.now() + SET.repeatMin * 60000, ref: nav.lastPos ? nav.lastPos.p : null, sentAny: false };
+  queueSms(sos.emerg.kind);
+  if (!a.silent) {
+    $('alarmTitle').textContent = 'Notsignal ausgelöst';
+    $('alarmSub').textContent = `Deine Kontakte erhalten deine Position. Alle ${SET.repeatMin} Minuten folgt ein Update.`;
+    $('alarmCount').hidden = true; $('alarmOk').textContent = "Mir geht's gut, Entwarnung senden"; $('alarm').hidden = false;
+    say('Notsignal ausgelöst.', true);
+  }
+  showDot();
+}
+function allClear(reason) {
+  const e = sos.emerg; if (!e) return;
+  outbox = outbox.filter(m => m.kind === 'test'); saveOutbox();
+  const sent = e.sentAny; sos.emerg = null; closeAlarm();
+  if (sent) queueSms('clear', reason);
+  say('Entwarnung. ' + reason + '.', true);
+}
+$('alarmOk').onclick = () => {
+  if (sos.emerg) allClear('Es geht mir gut'); else closeAlarm();
+  nav.graceSec = (nav.graceSec || 0) + 15 * 60; nav.stillSince = Date.now(); nav.stillRef = nav.lastPos ? nav.lastPos.p : null;
+};
+$('sosDot').onclick = () => { $('pinIn').value = ''; $('pinMsg').textContent = ''; $('pinAsk').hidden = false; };
+$('pinNo').onclick = () => { $('pinAsk').hidden = true; };
+$('pinOk').onclick = () => {
+  if (SET.pin && $('pinIn').value !== SET.pin) { $('pinMsg').textContent = 'Falsche PIN.'; return; }
+  $('pinAsk').hidden = true;
+  if (sos.emerg) allClear('Alarm per PIN beendet, alles in Ordnung'); else closeAlarm();
+};
+(function () {
+  const b = $('sos'); let t = null;
+  const start = e => { e.preventDefault(); clearTimeout(t); b.classList.add('hold'); t = setTimeout(() => { b.classList.remove('hold'); raiseAlarm('sos', { silent: true }); }, 1500); };
+  const stop = () => { clearTimeout(t); b.classList.remove('hold'); };
+  b.addEventListener('pointerdown', start);
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, stop));
+  b.addEventListener('contextmenu', e => e.preventDefault());
+})();
+function startSafety() {
+  nav.planSec = (S.cum[S.cum.length - 1] / 1000) * S.pace * 60; nav.graceSec = 0; nav.stillRef = null; nav.stillSince = Date.now(); nav.lastPos = null; nav.lastTickT = 0;
+  clearInterval(sos.tick); sos.tick = setInterval(safetyTick, 5000); $('sos').hidden = false;
+}
+function stopSafety() { clearInterval(sos.tick); sos.tick = null; if (sos.alarm && !sos.emerg) closeAlarm(); $('sos').hidden = true; }
+function safetyTick() {
+  if (!nav.on || nav.fin || nav.arrived) return;
+  const now = Date.now(); nav.lastTickT = now;
+  if (nav.lastPos && now - (nav.savedPosT || 0) > 60000) { nav.savedPosT = now; store.set('lastPos', { p: nav.lastPos.p, acc: nav.lastPos.acc, t: nav.lastPos.t }); }
+  if (SET.safety && !sos.alarm && !sos.emerg) {
+    const still = (now - nav.stillSince) / 1000, elapsed = (now - nav.t0) / 1000, limit = nav.planSec + SET.overMin * 60 + (nav.graceSec || 0);
+    if (still >= SET.stillMin * 60) raiseAlarm('still'); else if (elapsed >= limit) raiseAlarm('over');
+  }
+  const e = sos.emerg;
+  if (e) {
+    if (now >= e.nextAt) { e.nextAt = now + SET.repeatMin * 60000; queueSms('update'); }
+    if (!e.silent && e.ref && nav.lastPos && hav(e.ref, nav.lastPos.p) > 60 && now - nav.stillSince < 60000) allClear('Bewegung festgestellt');
+  }
+  flushOutbox();
+}
+
 /* ---------- Navigation ---------- */
 const nav = {
   on: false, watch: null, sim: null, progress: 0, base: 0, off: 0, wasOff: false, lastReroute: 0, rerouting: false,
   follow: true, me: null, acc: null, lastKm: 0, t0: 0, simS: 0, simOff: 0,
   track: [], dist: 0, lastFix: null, fin: false, arrived: false,
-  rem: [], goal: null, auto: true, offSince: 0, retries: 0, heading: null, hBuf: [], held: false, orig: null
+  rem: [], goal: null, auto: true, offSince: 0, retries: 0, heading: null, hBuf: [], held: false, orig: null,
+  air: null, lastPos: null, stillRef: null, stillSince: 0, planSec: 0, graceSec: 0, lastTickT: 0, savedPosT: 0
 };
 const ARROW = { left: -90, right: 90 };
 function setArrow(delta) {
@@ -971,6 +1314,8 @@ async function startNav() {
   nav.track = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
   nav.rem = S.wps.map(w => [w[0], w[1]]); nav.goal = (S.mode === 'p2p' && S.end) ? S.end : S.start; nav.auto = true; nav.offSince = 0; nav.retries = 0; nav.heading = null; nav.hBuf = []; nav.held = false;
   nav.orig = { pts: S.pts, cum: S.cum, instr: S.instr }; $('btnAuto').textContent = 'Neuplanung: automatisch';
+  nav.air = null; hideAsk(); startSafety();
+  if (SET.autoTiles && !nav.simMode) saveTiles(routeSet(), true);
   S.instr.forEach(i => { i.a1 = false; i.a2 = false; });
   $('panel').hidden = true; $('nav').hidden = false; $('recenter').hidden = true; $('banner').classList.remove('off');
   map.closePopup(); map.dragging.enable();
@@ -1005,6 +1350,8 @@ function stopTracking() {
 }
 function endNav() {
   nav.on = false;
+  stopSafety(); hideAsk(); nav.air = null;
+  if (SET.clearTiles) clearTiles();
   if (nav.orig) { S.pts = nav.orig.pts; S.cum = nav.orig.cum; S.instr = nav.orig.instr; nav.orig = null; if (S.pts.length > 1) drawRoute(); }
   stopTracking();
   if (nav.sim) clearInterval(nav.sim); nav.sim = null;
@@ -1018,7 +1365,7 @@ function endNav() {
   fit();
 }
 $('btnNav').onclick = () => { nav.simMode = false; startNav(); };
-$('btnStop').onclick = finishRun;
+$('btnStop').onclick = () => { if (sos.alarm || sos.emerg) { toast('Ein Alarm ist aktiv. Beende ihn zuerst.', 4000); return; } finishRun(); };
 $('recenter').onclick = () => { nav.follow = true; $('recenter').hidden = true; if (nav.me) map.setView(nav.me.getLatLng(), Math.max(map.getZoom(), 17)); };
 map.on('dragstart', () => { if (nav.on) { nav.follow = false; $('recenter').hidden = false; } });
 
@@ -1026,6 +1373,9 @@ function onPos(p, acc) {
   if (!nav.on || nav.arrived) return;
   if (!nav.me) nav.me = L.marker(p, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), interactive: false, zIndexOffset: 2000 }).addTo(map);
   nav.me.setLatLng(p);
+  nav.lastPos = { p, acc, t: Date.now() };
+  if (!nav.stillRef || hav(nav.stillRef, p) > 20) { nav.stillRef = p; nav.stillSince = Date.now(); }
+  if (Date.now() - (nav.lastTickT || 0) > 4000) safetyTick();
   if (acc != null) { if (!nav.acc) nav.acc = L.circle(p, { radius: acc, weight: 0, fillColor: '#1a73e8', fillOpacity: .12, interactive: false }).addTo(map); else nav.acc.setLatLng(p).setRadius(acc); }
   if (nav.follow) map.setView(p, Math.max(map.getZoom(), 17), { animate: true });
   if (!nav.lastFix) { nav.track.push([p[0], p[1]]); nav.lastFix = p; }
@@ -1037,6 +1387,11 @@ function onPos(p, acc) {
   const loc = locate_(p);
   const thresh = Math.max(45, Math.min((acc || 0) * 1.5, 90));
   const total = S.cum[S.cum.length - 1];
+  if (nav.air && loc.dist > thresh) {
+    updateNav(p, true); updateAir(p);
+    if (!nav.rerouting && Date.now() - nav.lastReroute > 30000) reroute(p, 'smart');
+    return;
+  }
   if (loc.dist > thresh) {
     if (!nav.offSince) nav.offSince = Date.now();
     if (nav.auto && Date.now() - nav.offSince > 12000 && !nav.rerouting && Date.now() - nav.lastReroute > 25000) {
@@ -1047,6 +1402,7 @@ function onPos(p, acc) {
     return;
   }
   nav.offSince = 0; nav.retries = 0;
+  if (nav.air) exitAir('Du bist wieder auf der Route.');
   if (nav.wasOff && !nav.rerouting) { nav.wasOff = false; setOff(false); say('Du bist wieder auf der Route.'); }
   nav.progress = Math.max(nav.progress - 30, loc.s);
   const covered = nav.base + nav.progress;
@@ -1118,11 +1474,12 @@ async function reroute(p, mode) {
     nav.base += nav.progress;
     S.pts = densify(leg, 25); S.cum = cumulative(S.pts); S.instr = makeInstructions(S.pts, S.cum);
     nav.progress = 0; nav.offSince = 0; nav.retries = 0; nav.wasOff = false; nav.held = false;
+    if (nav.air) exitAir();
     drawRoute(); setOff(false);
     say(mode === 'home' ? 'Route direkt zum Start berechnet.' : 'Neue Route berechnet. Ich führe dich von hier aus weiter.', true);
   } catch (e) {
-    say('Neuberechnung nicht möglich. Folge weiter deinem Weg.', true);
-    toast('Neuberechnung fehlgeschlagen.', 4000);
+    if (mode === 'home') toast('Keine Verbindung: Die Route zum Start kann gerade nicht berechnet werden.', 4000);
+    else enterAir();
   } finally { nav.rerouting = false; }
 }
 $('btnRejoin').onclick = () => { if (nav.me) reroute([nav.me.getLatLng().lat, nav.me.getLatLng().lng], 'manual'); };
