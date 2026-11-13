@@ -251,6 +251,13 @@ body[data-mode="p2p"] .p2p-only{display:block}
     </details>
 
     <details>
+      <summary>Alarm-Protokoll</summary>
+      <div class="hint" style="margin-top:8px">Was die Sicherheitsfunktion gemeldet hat, neueste zuerst.</div>
+      <div id="alogList" style="font-size:14px;margin-top:8px;line-height:1.5"></div>
+      <button class="btn" id="alogClear" type="button" style="margin-top:8px">Protokoll leeren</button>
+    </details>
+
+    <details>
       <summary>Sicherheit und Notfall</summary>
       <label class="row" style="gap:10px;margin-top:10px"><input type="checkbox" id="setSafety"> Sicherheitsalarm aktiv (Stillstand und Zeitüberschreitung)</label>
       <div class="lbl" style="margin-top:12px">Notfallkontakte (Handynummern)</div>
@@ -359,6 +366,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
 <div id="alarm" class="overlay" hidden role="alertdialog" aria-labelledby="alarmTitle">
   <h2 id="alarmTitle">Alarm</h2>
   <div id="alarmSub" style="font-size:20px">Notsignal an deine Kontakte in</div>
+  <div id="alarmWhy" style="font-size:18px;margin-top:6px"></div>
   <div id="alarmCount">30</div>
   <button class="big" id="alarmOk" type="button">Mir geht's gut</button>
 </div>
@@ -1219,6 +1227,29 @@ function startBeep() {
   } catch (e) {}
 }
 function stopBeep() { clearInterval(beepT); beepT = null; }
+const alog = (store.get('alog', []) || []);
+function renderLog() {
+  const el = $('alogList'); if (!el) return;
+  el.textContent = '';
+  if (!alog.length) { el.textContent = 'Noch keine Einträge.'; return; }
+  alog.slice().reverse().forEach(e => { const d = document.createElement('div'); const t = new Date(e.t); d.textContent = t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + t.toLocaleTimeString('de-DE') + '  ' + e.m; el.appendChild(d); });
+}
+function logA(m) { alog.push({ t: Date.now(), m }); while (alog.length > 150) alog.shift(); store.set('alog', alog); renderLog(); }
+$('alogClear').onclick = () => { alog.length = 0; store.set('alog', alog); renderLog(); };
+renderLog();
+function fmtMin(sec) { const m = Math.floor(sec / 60), s = Math.round(sec % 60); return m + ' Min ' + s + ' s'; }
+const steps = { ok: false, last: null, moveT: 0 };
+async function pollSteps() {
+  if (!NATIVE || !PL.RundlaufSteps) return;
+  try {
+    const r = await PL.RundlaufSteps.get();
+    if (!r || !r.available || r.steps == null || r.steps < 0) return;
+    const now = Date.now();
+    if (!steps.ok) { steps.ok = true; steps.last = r.steps; steps.moveT = now; logA('Schrittzähler aktiv'); return; }
+    if (r.steps - steps.last >= 3) { steps.last = r.steps; steps.moveT = now; }
+    else if (r.steps < steps.last) { steps.last = r.steps; }
+  } catch (e) {}
+}
 function notifyAlarm() {
   try { if (PL.LocalNotifications) PL.LocalNotifications.schedule({ notifications: [{ id: 911, title: 'Rundlauf Alarm', body: 'Bist du in Ordnung? App öffnen und "Mir geht\'s gut" tippen.', schedule: { at: new Date(Date.now() + 400) } }] }); } catch (e) {}
 }
@@ -1227,13 +1258,17 @@ function closeAlarm() { clearInterval(sos.cd); sos.cd = null; sos.alarm = null; 
 function raiseAlarm(kind, opt) {
   if (sos.alarm || sos.emerg || !nav.on) return;
   const silent = !!(opt && opt.silent);
+  const why = (opt && opt.why) || '';
+  logA(silent ? 'Stiller SOS ausgelöst' : (kind === 'still' ? 'STILLSTAND-ALARM: ' : 'ZEITÜBERSCHREITUNG-ALARM: ') + why);
   sos.alarm = { kind, silent, end: Date.now() + (silent ? SET.silentSec : SET.cdSec) * 1000, lastSay: 0, lastVib: 0 };
   clearInterval(sos.cd); sos.cd = setInterval(() => alarmTick(Date.now()), 1000);
   if (silent) { showDot(); return; }
   $('alarmTitle').textContent = kind === 'still' ? 'Keine Bewegung erkannt' : 'Geplante Zeit überschritten';
   $('alarmSub').textContent = 'Notsignal an deine Kontakte in';
+  $('alarmWhy').textContent = why;
   $('alarmCount').hidden = false; $('alarmOk').textContent = "Mir geht's gut"; $('alarm').hidden = false;
   startBeep(); notifyAlarm(); alarmTick(Date.now());
+  say((kind === 'still' ? 'Stillstandalarm. ' : 'Zeitüberschreitungsalarm. ') + why, true);
 }
 function alarmTick(now) {
   const a = sos.alarm; if (!a) return;
@@ -1241,11 +1276,12 @@ function alarmTick(now) {
   if (!a.silent) {
     $('alarmCount').textContent = rem;
     if (now - a.lastVib > 2000) { a.lastVib = now; try { navigator.vibrate && navigator.vibrate([600, 200, 600]); } catch (e) {} }
-    if (now - a.lastSay > 10000) { a.lastSay = now; say(`Alarm. Notsignal in ${rem} Sekunden. Tippe auf Mir geht es gut.`, true); }
+    if (now - a.lastSay > 10000) { a.lastSay = now; say(`${a.kind === 'still' ? 'Stillstand' : 'Zeitüberschreitung'}. Notsignal in ${rem} Sekunden. Tippe auf Mir geht es gut.`, true); }
   }
   if (rem <= 0) fireEmergency(a);
 }
 function fireEmergency(a) {
+  logA('Notsignal gesendet (' + (a.silent ? 'SOS' : a.kind) + ')');
   clearInterval(sos.cd); sos.cd = null; sos.alarm = null; stopBeep();
   sos.emerg = { kind: a.silent ? 'sos' : a.kind, silent: a.silent, nextAt: Date.now() + SET.repeatMin * 60000, ref: nav.lastPos ? nav.lastPos.p : null, sentAny: false };
   queueSms(sos.emerg.kind);
@@ -1259,12 +1295,14 @@ function fireEmergency(a) {
 }
 function allClear(reason) {
   const e = sos.emerg; if (!e) return;
+  logA('Entwarnung: ' + reason);
   outbox = outbox.filter(m => m.kind === 'test'); saveOutbox();
   const sent = e.sentAny; sos.emerg = null; closeAlarm();
   if (sent) queueSms('clear', reason);
   say('Entwarnung. ' + reason + '.', true);
 }
 $('alarmOk').onclick = () => {
+  logA("'Mir geht's gut' getippt");
   if (sos.emerg) allClear('Es geht mir gut'); else closeAlarm();
   nav.graceSec = (nav.graceSec || 0) + 15 * 60; nav.stillSince = Date.now(); nav.stillRef = nav.lastPos ? nav.lastPos.p : null;
 };
@@ -1285,16 +1323,25 @@ $('pinOk').onclick = () => {
 })();
 function startSafety() {
   nav.planSec = (S.cum[S.cum.length - 1] / 1000) * S.pace * 60; nav.graceSec = 0; nav.stillRef = null; nav.stillSince = Date.now(); nav.lastPos = null; nav.lastTickT = 0;
+  steps.ok = false; steps.last = null;
+  if (NATIVE && PL.RundlaufSteps && SET.safety) { try { PL.RundlaufSteps.start().then(pollSteps).catch(() => logA('Schrittzähler nicht verfügbar')); } catch (e) {} }
+  logA('Lauf gestartet, Plan ' + Math.round(nav.planSec / 60) + ' Min');
   clearInterval(sos.tick); sos.tick = setInterval(safetyTick, 5000); $('sos').hidden = false;
 }
 function stopSafety() { clearInterval(sos.tick); sos.tick = null; if (sos.alarm && !sos.emerg) closeAlarm(); $('sos').hidden = true; }
 function safetyTick() {
   if (!nav.on || nav.fin || nav.arrived) return;
   const now = Date.now(); nav.lastTickT = now;
+  pollSteps();
   if (nav.lastPos && now - (nav.savedPosT || 0) > 60000) { nav.savedPosT = now; store.set('lastPos', { p: nav.lastPos.p, acc: nav.lastPos.acc, t: nav.lastPos.t }); }
   if (SET.safety && !sos.alarm && !sos.emerg) {
     const still = (now - nav.stillSince) / 1000, elapsed = (now - nav.t0) / 1000, limit = nav.planSec + SET.overMin * 60 + (nav.graceSec || 0);
-    if (still >= SET.stillMin * 60) raiseAlarm('still'); else if (elapsed >= limit) raiseAlarm('over');
+    if (still >= SET.stillMin * 60) {
+      const stepStill = steps.ok ? (now - steps.moveT) / 1000 : still;
+      if (!steps.ok || stepStill >= SET.stillMin * 60) {
+        raiseAlarm('still', { why: steps.ok ? `Seit ${fmtMin(Math.min(still, stepStill))} keine Bewegung (GPS und Schritte)` : `Seit ${fmtMin(still)} keine GPS-Bewegung (kein Schrittzähler)` });
+      } else if (now - (nav.weakLogT || 0) > 300000) { nav.weakLogT = now; logA('GPS schwach: Schritte werden gezählt, kein Alarm'); }
+    } else if (elapsed >= limit) raiseAlarm('over', { why: `Plan ${Math.round(nav.planSec / 60)} Min, jetzt ${Math.round(elapsed / 60)} Min` });
   }
   const e = sos.emerg;
   if (e) {

@@ -132,11 +132,100 @@ public class RundlaufSmsPlugin extends Plugin {
     }
 }
 '''
+STEP_SRC = r'''package de.rundlauf.app;
+
+import android.Manifest;
+import android.content.Context;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.os.Build;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+
+@CapacitorPlugin(
+    name = "RundlaufSteps",
+    permissions = { @Permission(strings = { Manifest.permission.ACTIVITY_RECOGNITION }, alias = "activity") }
+)
+public class RundlaufStepsPlugin extends Plugin implements SensorEventListener {
+
+    private SensorManager sm;
+    private Sensor sensor;
+    private volatile float steps = -1;
+    private boolean registered = false;
+
+    @PluginMethod
+    public void start(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 29 && getPermissionState("activity") != PermissionState.GRANTED) {
+            requestPermissionForAlias("activity", call, "stepPermCallback");
+            return;
+        }
+        doStart(call);
+    }
+
+    @PermissionCallback
+    private void stepPermCallback(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= 29 && getPermissionState("activity") != PermissionState.GRANTED) {
+            call.reject("Keine Berechtigung fuer Schrittzaehler");
+        } else {
+            doStart(call);
+        }
+    }
+
+    private void doStart(PluginCall call) {
+        try {
+            if (sm == null) {
+                sm = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
+            }
+            sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+            if (sensor == null) {
+                call.reject("Kein Schrittzaehler im Geraet");
+                return;
+            }
+            if (!registered) {
+                registered = sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, 5000000);
+            }
+            JSObject r = new JSObject();
+            r.put("started", registered);
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject("Schrittzaehler-Fehler: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void get(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("available", registered && steps >= 0);
+        r.put("steps", (double) steps);
+        call.resolve(r);
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.values != null && event.values.length > 0) {
+            steps = event.values[0];
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+    }
+}
+'''
 root = pathlib.Path('android/app/src/main')
 mf = root / 'AndroidManifest.xml'
 s = mf.read_text()
-perms = ['ACCESS_FINE_LOCATION','ACCESS_COARSE_LOCATION','POST_NOTIFICATIONS','FOREGROUND_SERVICE','FOREGROUND_SERVICE_LOCATION','WAKE_LOCK','SEND_SMS']
+perms = ['ACCESS_FINE_LOCATION','ACCESS_COARSE_LOCATION','POST_NOTIFICATIONS','FOREGROUND_SERVICE','FOREGROUND_SERVICE_LOCATION','WAKE_LOCK','SEND_SMS','ACTIVITY_RECOGNITION']
 add = ''.join(f'    <uses-permission android:name="android.permission.{p}" />\n' for p in perms)
+add += '    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />\n'
 add += '    <uses-feature android:name="android.hardware.telephony" android:required="false" />\n'
 add += '    <queries>\n        <intent>\n            <action android:name="android.intent.action.TTS_SERVICE" />\n        </intent>\n    </queries>\n'
 if 'xmlns:tools' not in s:
@@ -171,5 +260,6 @@ main = mains[0]
 pkg = re.search(r'^package\s+([\w.]+);', main.read_text(), re.M).group(1)
 plugin_src = PLUGIN_SRC.replace('package de.rundlauf.app;', 'package ' + pkg + ';')
 (main.parent / 'RundlaufSmsPlugin.java').write_text(plugin_src)
-main.write_text('package ' + pkg + ';\n\nimport android.os.Bundle;\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(Bundle savedInstanceState) {\n        registerPlugin(RundlaufSmsPlugin.class);\n        super.onCreate(savedInstanceState);\n    }\n}\n')
+(main.parent / 'RundlaufStepsPlugin.java').write_text(STEP_SRC.replace('package de.rundlauf.app;', 'package ' + pkg + ';'))
+main.write_text('package ' + pkg + ';\n\nimport android.os.Bundle;\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(Bundle savedInstanceState) {\n        registerPlugin(RundlaufSmsPlugin.class);\n        registerPlugin(RundlaufStepsPlugin.class);\n        super.onCreate(savedInstanceState);\n    }\n}\n')
 print('SMS-Plugin eingebaut in', pkg)
