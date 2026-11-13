@@ -123,7 +123,7 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
 body[data-mode="p2p"] .loop-only{display:none!important}
 .p2p-only{display:none}
 body[data-mode="p2p"] .p2p-only{display:block}
-#sos{position:absolute;pointer-events:auto;left:max(12px,env(safe-area-inset-left,0px));bottom:200px;width:58px;height:58px;border-radius:50%;background:var(--danger);color:#fff;border:3px solid #fff;font:700 18px/1 var(--font-num);box-shadow:var(--shadow);touch-action:none;user-select:none;-webkit-user-select:none}
+#sos{position:absolute;pointer-events:auto;right:max(12px,env(safe-area-inset-right,0px));top:120px;width:58px;height:58px;border-radius:50%;background:var(--danger);color:#fff;border:3px solid #fff;font:700 18px/1 var(--font-num);box-shadow:var(--shadow);touch-action:none;user-select:none;-webkit-user-select:none}
 #sos.hold{transform:scale(.9);filter:brightness(1.3)}
 #sosDot{position:absolute;pointer-events:auto;top:max(8px,env(safe-area-inset-top,0px));left:8px;width:22px;height:22px;border-radius:50%;background:#666;opacity:.55;z-index:5}
 .overlay{position:absolute;z-index:1500;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;text-align:center}
@@ -134,6 +134,8 @@ body[data-mode="p2p"] .p2p-only{display:block}
 #airAsk{position:absolute;z-index:1400;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;box-shadow:var(--shadow);padding:16px max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:10px}
 #airAsk .big{border-color:var(--line);background:var(--forest);color:var(--forest-ink);max-width:none}
 #airAsk .big.alt{background:var(--soft);color:var(--ink)}
+.fold{align-self:flex-end;min-height:36px;padding:4px 12px;font-size:14px}
+#navbar.folded > .row{display:none}
 .ctcs{display:grid;gap:8px;margin-top:10px}
 .setgrid{display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;margin-top:10px}
 .setgrid input{width:100%;box-sizing:border-box}
@@ -288,6 +290,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
   <div id="sosDot" hidden role="button" aria-label="Alarm aktiv"></div>
   <button class="btn" id="recenter" type="button" hidden>Zentrieren</button>
   <div id="navbar">
+    <button class="btn fold" id="navFold" type="button" aria-expanded="true">Menü einklappen</button>
     <div class="stats">
       <div class="stat"><b id="nRest">–</b><span>km Rest</span></div>
       <div class="stat"><b id="nTime">–</b><span>Zeit Rest</span></div>
@@ -1003,6 +1006,14 @@ $('btnDim').onclick = () => { if (seenPin()) { setDim(true); reqLock(); } else {
 $('btnPinInfo').onclick = () => { pinNav = false; $('pinGo').textContent = 'Schließen'; $('pinHelp').hidden = false; };
 $('pinGo').onclick = () => { $('pinHelp').hidden = true; store.set('pinSeen', true); if (pinNav) { setDim(true); reqLock(); } };
 $('dim').addEventListener('click', () => { const n = Date.now(); if (n - lastTap < 450) setDim(false); lastTap = n; });
+
+/* ---------- Layout der Navigationsansicht ---------- */
+$('navFold').onclick = () => { const f = $('navbar').classList.toggle('folded'); $('navFold').textContent = f ? 'Menü ausklappen' : 'Menü einklappen'; $('navFold').setAttribute('aria-expanded', String(!f)); };
+(function () {
+  const place = () => { $('recenter').style.bottom = ($('navbar').offsetHeight + 12) + 'px'; $('sos').style.top = ($('banner').offsetHeight + 12) + 'px'; };
+  if (window.ResizeObserver) { const ro = new ResizeObserver(place); ro.observe($('navbar')); ro.observe($('banner')); }
+  window.addEventListener('resize', place);
+})();
 
 /* ---------- Sprache ---------- */
 const voice = { muted: false, v: null };
