@@ -31,16 +31,24 @@ jobs:
         run: |
           npx cap add android
           python3 patch_android.py
+          python3 patch_wear.py
       - name: Web-Dateien synchronisieren
         run: npx cap sync android
       - name: APK bauen
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew :app:assembleDebug --no-daemon
+      - name: Uhren-APK bauen
+        id: wear
+        continue-on-error: true
+        working-directory: android
+        run: ./gradlew :wear:assembleDebug --no-daemon
       - name: APK veroeffentlichen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk Rundlauf.apk
-          gh release create "build-${{ github.run_number }}" Rundlauf.apk --title "Rundlauf Build ${{ github.run_number }}" --notes "Debug-APK zum Installieren auf Android."
+          FILES="Rundlauf.apk"
+          if [ -f android/wear/build/outputs/apk/debug/wear-debug.apk ]; then cp android/wear/build/outputs/apk/debug/wear-debug.apk RundlaufUhr.apk; FILES="$FILES RundlaufUhr.apk"; fi
+          gh release create "build-${{ github.run_number }}" $FILES --title "Rundlauf Build ${{ github.run_number }}" --notes "Debug-APK zum Installieren auf Android."

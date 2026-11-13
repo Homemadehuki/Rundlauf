@@ -136,6 +136,8 @@ body[data-mode="p2p"] .p2p-only{display:block}
 #airAsk .big.alt{background:var(--soft);color:var(--ink)}
 .fold{align-self:flex-end;min-height:36px;padding:4px 12px;font-size:14px}
 #navbar.folded > .row{display:none}
+#hrChip{position:absolute;pointer-events:none;left:max(12px,env(safe-area-inset-left,0px));top:120px;background:rgba(20,20,24,.82);color:#fff;border-radius:18px;padding:6px 12px;font-size:18px;font-weight:700;z-index:5}
+#hrChip.stale{opacity:.5}
 .ctcs{display:grid;gap:8px;margin-top:10px}
 .setgrid{display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;margin-top:10px}
 .setgrid input{width:100%;box-sizing:border-box}
@@ -293,6 +295,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
     <svg id="arrow" viewBox="0 0 48 48" aria-hidden="true"><g id="arrowG" transform-origin="24 24"><path d="M24 4 L38 22 H29 V44 H19 V22 H10 Z" fill="currentColor"/></g></svg>
     <div><div class="dist" id="nDist">–</div><div class="what" id="nWhat">Start…</div></div>
   </div>
+  <div id="hrChip" hidden aria-live="off">♥ --</div>
   <button id="sos" type="button" hidden aria-label="Stiller Notfallknopf, 1,5 Sekunden gedrückt halten">SOS</button>
   <div id="sosDot" hidden role="button" aria-label="Alarm aktiv"></div>
   <button class="btn" id="recenter" type="button" hidden>Zentrieren</button>
@@ -1018,7 +1021,7 @@ $('dim').addEventListener('click', () => { const n = Date.now(); if (n - lastTap
 /* ---------- Layout der Navigationsansicht ---------- */
 $('navFold').onclick = () => { const f = $('navbar').classList.toggle('folded'); $('navFold').textContent = f ? 'Menü ausklappen' : 'Menü einklappen'; $('navFold').setAttribute('aria-expanded', String(!f)); };
 (function () {
-  const place = () => { $('recenter').style.bottom = ($('navbar').offsetHeight + 12) + 'px'; $('sos').style.top = ($('banner').offsetHeight + 12) + 'px'; };
+  const place = () => { $('recenter').style.bottom = ($('navbar').offsetHeight + 12) + 'px'; $('sos').style.top = ($('banner').offsetHeight + 12) + 'px'; $('hrChip').style.top = ($('banner').offsetHeight + 12) + 'px'; };
   if (window.ResizeObserver) { const ro = new ResizeObserver(place); ro.observe($('navbar')); ro.observe($('banner')); }
   window.addEventListener('resize', place);
 })();
@@ -1250,6 +1253,22 @@ async function pollSteps() {
     else if (r.steps < steps.last) { steps.last = r.steps; }
   } catch (e) {}
 }
+const watch = { bpm: 0, t: 0, logT: 0, on: false, min: 999, max: 0 };
+function onHr(bpm) {
+  const now = Date.now();
+  if (!(bpm > 0)) return;
+  if (watch.on !== true) { watch.on = true; logA('Uhr verbunden, Puls ' + bpm); }
+  watch.bpm = bpm; watch.t = now;
+  if (nav.on) { nav.hrMin = Math.min(nav.hrMin || 999, bpm); nav.hrMax = Math.max(nav.hrMax || 0, bpm); nav.hrSum = (nav.hrSum || 0) + bpm; nav.hrN = (nav.hrN || 0) + 1; }
+  if (now - watch.logT > 300000) { watch.logT = now; logA('Puls ' + bpm + ' (Uhr)'); }
+  const c = $('hrChip'); c.hidden = !nav.on; c.textContent = '♥ ' + bpm; c.classList.remove('stale');
+}
+setInterval(() => {
+  const c = $('hrChip');
+  if (!watch.on) return;
+  if (Date.now() - watch.t > 15000) { c.classList.add('stale'); c.textContent = '♥ --'; if (watch.on === true) { watch.on = 'lost'; logA('Uhr: kein Puls mehr empfangen'); } }
+}, 5000);
+if (NATIVE && PL.RundlaufWatch) { try { PL.RundlaufWatch.addListener('hr', e => onHr(Math.round(e.bpm))); } catch (e) {} }
 function notifyAlarm() {
   try { if (PL.LocalNotifications) PL.LocalNotifications.schedule({ notifications: [{ id: 911, title: 'Rundlauf Alarm', body: 'Bist du in Ordnung? App öffnen und "Mir geht\'s gut" tippen.', schedule: { at: new Date(Date.now() + 400) } }] }); } catch (e) {}
 }
@@ -1328,7 +1347,7 @@ function startSafety() {
   logA('Lauf gestartet, Plan ' + Math.round(nav.planSec / 60) + ' Min');
   clearInterval(sos.tick); sos.tick = setInterval(safetyTick, 5000); $('sos').hidden = false;
 }
-function stopSafety() { clearInterval(sos.tick); sos.tick = null; if (sos.alarm && !sos.emerg) closeAlarm(); $('sos').hidden = true; }
+function stopSafety() { $('hrChip').hidden = true; clearInterval(sos.tick); sos.tick = null; if (sos.alarm && !sos.emerg) closeAlarm(); $('sos').hidden = true; }
 function safetyTick() {
   if (!nav.on || nav.fin || nav.arrived) return;
   const now = Date.now(); nav.lastTickT = now;
