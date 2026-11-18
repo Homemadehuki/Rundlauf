@@ -138,6 +138,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
 #navbar.folded > .row{display:none}
 #hrChip{position:absolute;pointer-events:none;left:max(12px,env(safe-area-inset-left,0px));top:120px;background:rgba(20,20,24,.82);color:#fff;border-radius:18px;padding:6px 12px;font-size:18px;font-weight:700;z-index:5}
 #hrChip.stale{opacity:.5}
+#hrChip.z0{color:#fff}#hrChip.z1{color:#ff9800}#hrChip.z2{color:#3ddc84}#hrChip.z3{color:#ff3b30}
 .ctcs{display:grid;gap:8px;margin-top:10px}
 .setgrid{display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;margin-top:10px}
 .setgrid input{width:100%;box-sizing:border-box}
@@ -257,6 +258,18 @@ body[data-mode="p2p"] .p2p-only{display:block}
       <label class="row" style="gap:10px;margin-top:10px"><input type="checkbox" id="setDetail"> Kreuzungen genau ansagen (Weg zählen, auch geradeaus)</label>
       <label class="row" style="gap:10px;margin-top:6px"><input type="checkbox" id="setDeg"> Mit Himmelsrichtung und Gradangabe</label>
       <div class="hint" style="margin-top:6px">Nutzt OpenStreetMap-Daten. Fehlt ein Pfad dort, kennt ihn die App nicht.</div>
+    </details>
+
+    <details>
+      <summary>Puls und Uhr</summary>
+      <label class="row" style="gap:10px;margin-top:10px"><input type="checkbox" id="setZoneSay"> Pulszonen ansagen (bei Wechsel)</label>
+      <div class="setgrid">
+        <label for="setZLow">Ab hier unterer Bereich (orange)</label><input type="text" id="setZLow" inputmode="numeric">
+        <label for="setZOpt">Ab hier Optimalbereich (grün)</label><input type="text" id="setZOpt" inputmode="numeric">
+        <label for="setZHigh">Ab hier zu hoch (rot)</label><input type="text" id="setZHigh" inputmode="numeric">
+        <label for="setHrInt">Puls senden alle (Sekunden, 1 bis 30)</label><input type="text" id="setHrInt" inputmode="numeric">
+      </div>
+      <div class="hint" style="margin-top:6px">Unter dem ersten Wert gilt Ruhepuls (weiß). Die Grenzen sind keine medizinischen Werte, trage deine eigenen ein.</div>
     </details>
 
     <details>
@@ -579,11 +592,11 @@ const CAP = window.Capacitor;
 const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
 const PL = (NATIVE && CAP.Plugins) || {};
 const BG = PL.BackgroundGeolocation || null;
-async function saveFile(name, text, mime) {
+async function saveFile(name, text, mime, title) {
   if (NATIVE && PL.Filesystem && PL.Share) {
     try {
       const r = await PL.Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
-      await PL.Share.share({ title: name, url: r.uri, dialogTitle: 'Speichern oder teilen' });
+      await PL.Share.share({ title: title || name, text: title || undefined, url: r.uri, dialogTitle: 'Speichern oder teilen' });
     } catch (e) { toast('Speichern nicht möglich.'); }
     return;
   }
@@ -599,7 +612,7 @@ const S = {
 const $ = id => document.getElementById(id);
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
 };
 let toastT;
 function toast(msg, ms = 3500) {
@@ -992,7 +1005,45 @@ const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 const pad2 = n => String(n).padStart(2, '0');
 const fmtPace = (sec, m) => { if (!m) return '–'; const p = sec / (m / 1000); return `${Math.floor(p / 60)}:${pad2(Math.round(p % 60) % 60)}`; };
 let hist = store.get('hist', []);
-function saveHist() { store.set('hist', hist); }
+function saveHist() {
+  if (!store.set('hist', hist)) {
+    // Speicher voll: Detaildaten aelterer Laeufe entfernen
+    for (let i = 20; i < hist.length; i++) delete hist[i].gx;
+    store.set('hist', hist);
+  }
+}
+// Kompakte Punktliste fuer den GPX-Export: [lat, lon, Sekunden seit Start, Hoehe, Puls]
+function buildGx(r) {
+  const n = r.track.length; if (n < 2 || !r.tt || r.tt.length !== n) return null;
+  const idx = []; const m = Math.min(n, 800);
+  for (let k = 0; k < m; k++) idx.push(Math.round(k * (n - 1) / (m - 1 || 1)));
+  const cum = cumulative(r.track);
+  const ele = d => {
+    if (!r.es || !r.el) return null;
+    let i = 0; while (i < r.es.length - 2 && r.es[i + 1] < d) i++;
+    const t = Math.min(1, Math.max(0, (d - r.es[i]) / ((r.es[i + 1] - r.es[i]) || 1)));
+    return Math.round(r.el[i] + (r.el[i + 1] - r.el[i]) * t);
+  };
+  return idx.map(i => [+r.track[i][0].toFixed(5), +r.track[i][1].toFixed(5), Math.round((r.tt[i] - r.t) / 1000), ele(cum[i]), r.th && r.th[i] ? r.th[i] : 0]);
+}
+function buildGpx(e, title) {
+  let pts;
+  if (e.gx && e.gx.length > 1) pts = e.gx.map(g => ({ lat: g[0], lon: g[1], t: e.t + g[2] * 1000, ele: g[3], hr: g[4] }));
+  else {
+    const tr = e.track || [], c = cumulative(tr), tot = c[c.length - 1] || 1;
+    pts = tr.map((q, i) => ({ lat: q[0], lon: q[1], t: e.t + e.sec * 1000 * (c[i] / tot), ele: null, hr: 0 }));
+  }
+  const hasHr = pts.some(q => q.hr > 0);
+  const x = pts.map(q => `<trkpt lat="${q.lat}" lon="${q.lon}">` + (q.ele != null ? `<ele>${q.ele}</ele>` : '') + `<time>${new Date(q.t).toISOString()}</time>` + (q.hr > 0 ? `<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>${q.hr}</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions>` : '') + `</trkpt>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Rundlauf" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"><metadata><time>${new Date(e.t).toISOString()}</time></metadata><trk><name>${esc(title)}</name><type>running</type><trkseg>${x}</trkseg></trk></gpx>`;
+}
+async function placeName(p) {
+  try {
+    const j = await getJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&accept-language=de&lat=${p[0]}&lon=${p[1]}`);
+    const a = j.address || {};
+    return a.city || a.town || a.village || a.suburb || a.municipality || a.county || '';
+  } catch (e) { return ''; }
+}
 function setTab(t) {
   const h = t === 'hist';
   $('tabPlan').setAttribute('aria-selected', String(!h)); $('tabHist').setAttribute('aria-selected', String(h));
@@ -1015,7 +1066,7 @@ function renderHist() {
       ${e.prof && e.prof.length > 1 ? `<svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-label="Höhenprofil">${sparkSvg(e.prof)}</svg>` : ''}
       ${e.note ? `<div class="hnote">${esc(e.note)}</div>` : ''}
       <div class="row"><label class="hint">Bewertung <select data-act="rate">${opts}</select></label>
-      <button class="btn" data-act="map" type="button">Karte</button><button class="btn" data-act="again" type="button">Nochmal laufen</button><button class="btn" data-act="del" type="button">Löschen</button></div></div>`;
+      <button class="btn" data-act="map" type="button">Karte</button><button class="btn" data-act="gpx" type="button">Für Strava teilen</button><button class="btn" data-act="again" type="button">Nochmal laufen</button><button class="btn" data-act="del" type="button">Löschen</button></div></div>`;
   }).join('');
 }
 $('hList').addEventListener('click', ev => {
@@ -1026,6 +1077,17 @@ $('hList').addEventListener('click', ev => {
   } else if (b.dataset.act === 'map') {
     histLayer.clearLayers();
     if (e.track && e.track.length > 1) { L.polyline(e.track, { color: '#fff', weight: 8 }).addTo(histLayer); L.polyline(e.track, { color: '#1a73e8', weight: 4 }).addTo(histLayer); fit(e.track); }
+  } else if (b.dataset.act === 'gpx') {
+    b.disabled = true;
+    (async () => {
+      const pt = (e.gx && e.gx[0]) ? [e.gx[0][0], e.gx[0][1]] : (e.track && e.track[0]);
+      const place = pt ? await placeName(pt) : '';
+      const d = new Date(e.t), ds = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      const title = `${place ? 'Lauf in ' + place : 'Lauf'}, ${(e.dist / 1000).toFixed(1).replace('.', ',')} km in ${fmtTime(e.sec)}`;
+      await saveFile(`Lauf_${ds}_${(e.dist / 1000).toFixed(1)}km.gpx`, buildGpx(e, title), 'application/gpx+xml', title);
+      b.disabled = false;
+      if (!(e.gx && e.gx.length > 1)) toast('Älterer Lauf: Zeiten sind gleichmäßig verteilt, kein Puls und keine Höhe.', 5000);
+    })();
   } else if (b.dataset.act === 'again') {
     S.start = e.start; S.wps = e.wps || []; S.end = e.end || null; applyMode(e.mode || 'loop'); S.pts = []; S.cum = []; S.elev = null; lines.clearLayers();
     setTab('plan'); drawMarkers(); persist(); recompute().then(() => fit());
@@ -1061,7 +1123,7 @@ function finishRun() {
   try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
   ttsStop();
   if (!nav.rec && !nav.simMode) { toast('Navigation beendet, es wurde nichts aufgezeichnet.', 4000); endNav(); return; }
-  run = { id: Date.now(), t: nav.t0, dist: nav.dist, sec: (Date.now() - nav.t0) / 1000, track: nav.track.slice(), sim: !!nav.simMode, rating: null, up: null, down: null, prof: null, start: S.start, wps: S.wps.slice(), end: S.end, mode: S.mode };
+  run = { id: Date.now(), t: nav.t0, dist: nav.dist, sec: (Date.now() - nav.t0) / 1000, track: nav.track.slice(), tt: nav.tt.slice(), th: nav.th.slice(), sim: !!nav.simMode, rating: null, up: null, down: null, prof: null, start: S.start, wps: S.wps.slice(), end: S.end, mode: S.mode };
   $('fKm').textContent = (run.dist / 1000).toFixed(2); $('fTime').textContent = fmtTime(run.sec); $('fPace').textContent = fmtPace(run.sec, run.dist);
   $('fUp').textContent = '…'; $('fDown').textContent = '…'; $('fProf').innerHTML = ''; $('fNote').value = '';
   document.querySelectorAll('#fRate button').forEach(x => x.setAttribute('aria-pressed', 'false'));
@@ -1075,6 +1137,7 @@ async function runElev(r) {
     const tr = r.track; if (tr.length < 2) throw 0;
     const cum = cumulative(tr), sm = sampleRoute(tr, cum, 250, 40), el = await fetchElev(sm.coords);
     if (run !== r) return;
+    r.es = sm.s; r.el = el;
     const st = elevStats(el); r.up = st.up; r.down = st.down; r.prof = resample(el, 60).map(v => Math.round(v));
   } catch (e) {
     if (run !== r) return;
@@ -1086,7 +1149,8 @@ async function runElev(r) {
 $('fSave').onclick = () => {
   if (!run) return;
   const thin = resample(run.track, 250).map(p => [+p[0].toFixed(5), +p[1].toFixed(5)]);
-  hist.unshift({ id: run.id, t: run.t, dist: run.dist, sec: run.sec, up: run.up, down: run.down, rating: run.rating, note: $('fNote').value.trim(), prof: run.prof, track: thin, start: run.start, wps: run.wps, end: run.end, mode: run.mode });
+  const gx = buildGx(run);
+  hist.unshift({ gx, id: run.id, t: run.t, dist: run.dist, sec: run.sec, up: run.up, down: run.down, rating: run.rating, note: $('fNote').value.trim(), prof: run.prof, track: thin, start: run.start, wps: run.wps, end: run.end, mode: run.mode });
   saveHist(); closeRun(); setTab('hist'); toast('Lauf gespeichert.');
 };
 $('fDiscard').onclick = closeRun;
@@ -1174,13 +1238,13 @@ $('btnMute').onclick = () => {
 };
 
 /* ---------- Einstellungen ---------- */
-const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true, detail: true, deg: true }, store.get('settings', {}));
+const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true, detail: true, deg: true, zLow: 100, zOpt: 130, zHigh: 160, zoneSay: true, hrInt: 5 }, store.get('settings', {}));
 function saveSet() { store.set('settings', SET); }
 (function bindSettings() {
   const num = (id, key, min, max) => { const e = $(id); e.value = SET[key]; e.onchange = () => { let v = parseFloat(String(e.value).replace(',', '.')); if (!(v >= min)) v = SET[key]; SET[key] = Math.min(max, v); e.value = SET[key]; saveSet(); }; };
   const chk = (id, key) => { const e = $(id); e.checked = !!SET[key]; e.onchange = () => { SET[key] = e.checked; saveSet(); }; };
   chk('setSafety', 'safety'); chk('setAutoTiles', 'autoTiles'); chk('setClearTiles', 'clearTiles');
-  chk('setDetail', 'detail'); chk('setDeg', 'deg'); num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
+  chk('setDetail', 'detail'); chk('setZoneSay', 'zoneSay'); num('setZLow', 'zLow', 40, 220); num('setZOpt', 'zOpt', 40, 230); num('setZHigh', 'zHigh', 40, 240); num('setHrInt', 'hrInt', 1, 30); chk('setDeg', 'deg'); num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
   [1, 2, 3].forEach(i => { const e = $('ctc' + i); e.value = SET.contacts[i - 1] || ''; e.onchange = () => { SET.contacts[i - 1] = e.value.trim().replace(/[^\d+]/g, ''); e.value = SET.contacts[i - 1]; saveSet(); }; });
   const pin = $('setPin'); pin.value = SET.pin; pin.onchange = () => { SET.pin = pin.value.replace(/\D/g, '').slice(0, 8); pin.value = SET.pin; saveSet(); };
   const tk = $('setTileKm'); tk.value = String(SET.tileKm); tk.onchange = () => { SET.tileKm = +tk.value; saveSet(); };
@@ -1370,6 +1434,24 @@ async function pollSteps() {
   } catch (e) {}
 }
 const watch = { bpm: 0, t: 0, logT: 0, on: false, min: 999, max: 0 };
+function pushWatch(end) {
+  if (!NATIVE || !PL.RundlaufWatch || !watch.on) return;
+  const o = { g: nav.guide ? 1 : 0, z: [SET.zLow, SET.zOpt, SET.zHigh], iv: SET.hrInt, vib: nav.vibId || 0, vk: nav.vibKind || '' };
+  if (end) o.end = 1;
+  else {
+    o.tm = fmtTime((Date.now() - nav.t0) / 1000); o.done = (nav.dist / 1000).toFixed(1).replace('.', ',');
+    if (nav.guide) {
+      const total = S.cum[S.cum.length - 1], nxt = S.instr.find(i => i.s > nav.progress - 8);
+      o.rest = (Math.max(0, total - nav.progress) / 1000).toFixed(1).replace('.', ',');
+      if (nav.wasOff || nav.air) { o.tx = 'Abseits'; }
+      else if (nxt) { o.ar = Math.round(Math.max(-160, Math.min(160, nxt.delta))); o.d = Math.max(0, Math.round(nxt.s - nav.progress)); o.tx = (nxt.now || nxt.text).split(',')[0]; }
+      else { o.ar = 0; o.d = Math.max(0, Math.round(total - nav.progress)); o.tx = 'Ziel'; }
+    }
+  }
+  try { PL.RundlaufWatch.send({ path: '/rundlauf/nav', data: JSON.stringify(o) }).catch(() => {}); } catch (e) {}
+}
+function vibWatch(kind) { nav.vibId = (nav.vibId || 0) + 1; nav.vibKind = kind; pushWatch(); }
+function curHr() { return (watch.on && Date.now() - watch.t < 15000) ? watch.bpm : 0; }
 function onHr(bpm) {
   const now = Date.now();
   if (!(bpm > 0)) return;
@@ -1377,12 +1459,21 @@ function onHr(bpm) {
   watch.bpm = bpm; watch.t = now;
   if (nav.on) { nav.hrMin = Math.min(nav.hrMin || 999, bpm); nav.hrMax = Math.max(nav.hrMax || 0, bpm); nav.hrSum = (nav.hrSum || 0) + bpm; nav.hrN = (nav.hrN || 0) + 1; }
   if (now - watch.logT > 300000) { watch.logT = now; logA('Puls ' + bpm + ' (Uhr)'); }
-  const c = $('hrChip'); c.hidden = !nav.on; c.textContent = '♥ ' + bpm; c.classList.remove('stale');
+  const t = [SET.zLow, SET.zOpt, SET.zHigh];
+  let z = watch.z;
+  if (z == null) { z = 0; if (bpm >= t[0]) z = 1; if (bpm >= t[1]) z = 2; if (bpm >= t[2]) z = 3; }
+  while (z < 3 && bpm >= t[z] + 3) z++;
+  while (z > 0 && bpm < t[z - 1] - 3) z--;
+  if (watch.z != null && z !== watch.z && nav.on && SET.zoneSay && (z === 3 || now - (watch.sayT || 0) > 30000)) {
+    watch.sayT = now; say(['Ruhebereich.', 'Puls im unteren Bereich.', 'Optimalbereich.', 'Puls zu hoch.'][z], z === 3);
+  }
+  watch.z = z;
+  const c = $('hrChip'); c.hidden = !nav.on; c.textContent = '♥ ' + bpm; c.className = 'z' + z;
 }
 setInterval(() => {
   const c = $('hrChip');
   if (!watch.on) return;
-  if (Date.now() - watch.t > 15000) { c.classList.add('stale'); c.textContent = '♥ --'; if (watch.on === true) { watch.on = 'lost'; logA('Uhr: kein Puls mehr empfangen'); } }
+  if (Date.now() - watch.t > 15000) { c.classList.add('stale'); c.textContent = '♥ --'; watch.z = null; if (watch.on === true) { watch.on = 'lost'; logA('Uhr: kein Puls mehr empfangen'); } }
 }, 5000);
 if (NATIVE && PL.RundlaufWatch) { try { PL.RundlaufWatch.addListener('hr', e => onHr(Math.round(e.bpm))); } catch (e) {} }
 function notifyAlarm() {
@@ -1517,10 +1608,11 @@ async function startNav() {
   nav.guide = true; ['btnRejoin', 'btnAuto', 'btnHome'].forEach(id => { $(id).hidden = false; });
   if (S.juncFor !== S.pts) loadJunctions();
   nav.on = true; nav.progress = 0; nav.base = 0; nav.off = 0; nav.wasOff = false; nav.lastKm = 0; nav.t0 = Date.now(); nav.follow = true;
-  nav.track = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
+  nav.track = []; nav.tt = []; nav.th = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
   nav.rem = S.wps.map(w => [w[0], w[1]]); nav.goal = (S.mode === 'p2p' && S.end) ? S.end : S.start; nav.auto = true; nav.offSince = 0; nav.retries = 0; nav.heading = null; nav.hBuf = []; nav.held = false;
   nav.orig = { pts: S.pts, cum: S.cum, instr: S.instr }; $('btnAuto').textContent = 'Neuplanung: automatisch';
   nav.air = null; hideAsk(); startSafety();
+  nav.vibId = 0; clearInterval(nav.wTick); nav.wTick = setInterval(() => pushWatch(), 2500);
   if (SET.autoTiles && !nav.simMode) saveTiles(routeSet(), true);
   S.instr.forEach(i => { i.a1 = false; i.a2 = false; i.a3 = false; i.wrong = false; });
   $('panel').hidden = true; $('nav').hidden = false; $('recenter').hidden = true; $('banner').classList.remove('off');
@@ -1555,7 +1647,7 @@ function stopTracking() {
   if (BG && nav.bgId != null) { try { BG.removeWatcher({ id: nav.bgId }); } catch (e) {} nav.bgId = null; }
 }
 function endNav() {
-  nav.on = false;
+  nav.on = false; clearInterval(nav.wTick); pushWatch(true);
   stopSafety(); hideAsk(); nav.air = null;
   if (SET.clearTiles) clearTiles();
   if (nav.orig) { S.pts = nav.orig.pts; S.cum = nav.orig.cum; S.instr = nav.orig.instr; nav.orig = null; if (S.pts.length > 1) drawRoute(); }
@@ -1598,8 +1690,8 @@ function onPos(p, acc) {
   if (Date.now() - (nav.lastTickT || 0) > 4000) safetyTick();
   if (acc != null) { if (!nav.acc) nav.acc = L.circle(p, { radius: acc, weight: 0, fillColor: '#1a73e8', fillOpacity: .12, interactive: false }).addTo(map); else nav.acc.setLatLng(p).setRadius(acc); }
   if (nav.follow) map.setView(p, Math.max(map.getZoom(), 17), { animate: true });
-  if (!nav.lastFix) { nav.track.push([p[0], p[1]]); nav.lastFix = p; }
-  else { const d = hav(nav.lastFix, p); if (d >= 4 && d < 250 && (acc == null || acc <= 40)) { nav.dist += d; nav.track.push([p[0], p[1]]); nav.lastFix = p;
+  if (!nav.lastFix) { nav.track.push([p[0], p[1]]); nav.tt.push(Date.now()); nav.th.push(curHr()); nav.lastFix = p; }
+  else { const d = hav(nav.lastFix, p); if (d >= 4 && d < 250 && (acc == null || acc <= 40)) { nav.dist += d; nav.track.push([p[0], p[1]]); nav.tt.push(Date.now()); nav.th.push(curHr()); nav.lastFix = p;
     nav.hBuf.push(p); if (nav.hBuf.length > 8) nav.hBuf.shift();
     if (hav(nav.hBuf[0], p) >= 15) nav.heading = brg(nav.hBuf[0], p); } }
   nav.rem = nav.rem.filter(w => hav(w, p) > 40);
@@ -1617,7 +1709,7 @@ function onPos(p, acc) {
     const j = S.instr.find(i => Math.abs(loc.s - i.s) < 30 && !i.wrong);
     if (j) {
       const rb = brg(pointAt(Math.max(0, loc.s - 8)), pointAt(Math.min(S.cum[S.cum.length - 1], loc.s + 8)));
-      if (Math.abs(relAng(rb, nav.heading)) > 35) { j.wrong = true; say('Achtung, das ist wahrscheinlich der falsche Weg. Prüfe die Abzweigung.', true); }
+      if (Math.abs(relAng(rb, nav.heading)) > 35) { j.wrong = true; say('Achtung, das ist wahrscheinlich der falsche Weg. Prüfe die Abzweigung.', true); vibWatch('W'); }
     }
   }
   if (loc.dist > thresh) {
@@ -1647,7 +1739,7 @@ function onPos(p, acc) {
     const det = SET.detail !== false && nxt.detail;
     if (d <= 180 && !nxt.a1 && !nxt.a2 && !nxt.a3 && !nxt.straight) { nxt.a1 = true; say(`In ${roundM(d)} Metern ${nxt.text}.`); }
     if (det && d <= 60 && !nxt.a3 && !nxt.a2) { nxt.a3 = true; nxt.a1 = true; say(nxt.detail, true); }
-    if (d <= 22 && !nxt.a2) { nxt.a2 = true; nxt.a1 = true; if (!nxt.straight) say(`Jetzt ${nxt.now || nxt.text}.`, true); }
+    if (d <= 22 && !nxt.a2) { nxt.a2 = true; nxt.a1 = true; if (!nxt.straight) { say(`Jetzt ${nxt.now || nxt.text}.`, true); vibWatch(nxt.delta > 0 ? 'R' : 'L'); } }
   }
   if (total - nav.progress < 25 && covered > Math.min(300, total * .5)) {
     say(`Ziel erreicht. Gut gemacht! ${(nav.dist / 1000).toFixed(1).replace('.', ',')} Kilometer in ${fmtTime((Date.now() - nav.t0) / 1000)}.`, true);
