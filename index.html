@@ -253,6 +253,13 @@ body[data-mode="p2p"] .p2p-only{display:block}
     </details>
 
     <details>
+      <summary>Ansagen an Kreuzungen</summary>
+      <label class="row" style="gap:10px;margin-top:10px"><input type="checkbox" id="setDetail"> Kreuzungen genau ansagen (Weg zählen, auch geradeaus)</label>
+      <label class="row" style="gap:10px;margin-top:6px"><input type="checkbox" id="setDeg"> Mit Himmelsrichtung und Gradangabe</label>
+      <div class="hint" style="margin-top:6px">Nutzt OpenStreetMap-Daten. Fehlt ein Pfad dort, kennt ihn die App nicht.</div>
+    </details>
+
+    <details>
       <summary>Alarm-Protokoll</summary>
       <div class="hint" style="margin-top:8px">Was die Sicherheitsfunktion gemeldet hat, neueste zuerst.</div>
       <div id="alogList" style="font-size:14px;margin-top:8px;line-height:1.5"></div>
@@ -381,6 +388,13 @@ body[data-mode="p2p"] .p2p-only{display:block}
     <div class="row"><button class="btn go" id="pinOk" type="button" style="flex:1">Alarm beenden</button><button class="btn" id="pinNo" type="button">Zurück</button></div>
   </div>
 </div>
+<div class="modal" id="dlg" hidden style="z-index:1650">
+  <div class="sheet" role="dialog" aria-labelledby="dlgT">
+    <h2 id="dlgT"></h2>
+    <div class="hint" id="dlgS"></div>
+    <div id="dlgB" style="display:flex;flex-direction:column;gap:8px;margin-top:10px"></div>
+  </div>
+</div>
 <div id="toast" role="status" hidden></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -456,7 +470,7 @@ function makeInstructions(pts, cum) {
     const side = right ? 'rechts' : 'links';
     const text = mag >= 135 ? `scharf ${side} abbiegen` : mag >= 75 ? `${side} abbiegen` : `leicht ${side} halten`;
     const prev = out[out.length - 1];
-    if (!prev || g.s - prev.s > 45) out.push({ s: g.s, text, delta: g.delta, a1: false, a2: false });
+    if (!prev || g.s - prev.s > 45) out.push({ s: g.s, text, delta: g.delta, a1: false, a2: false, a3: false });
     group = [];
   };
   for (const c of cand) {
@@ -479,6 +493,84 @@ function fmtTime(sec) {
   sec = Math.max(0, Math.round(sec));
   const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
   return h ? `${h}:${String(m).padStart(2, '0')}h` : `${m}:${String(s).padStart(2, '0')}`;
+}
+// ---- Kreuzungen aus OSM-Wegen
+function routePtAt(pts, cum, s) {
+  s = Math.max(0, Math.min(cum[cum.length - 1], s));
+  let i = 0; while (i < cum.length - 2 && cum[i + 1] < s) i++;
+  const t = (s - cum[i]) / ((cum[i + 1] - cum[i]) || 1);
+  return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t];
+}
+const COMPASS = ['Norden', 'Nordosten', 'Osten', 'Südosten', 'Süden', 'Südwesten', 'Westen', 'Nordwesten'];
+function compassDe(b) { return COMPASS[Math.round(b / 45) % 8]; }
+function relAng(a, b) { return ((b - a + 540) % 360) - 180; }
+function dirWord(a) { const m = Math.abs(a), side = a > 0 ? 'rechts' : 'links'; return m < 20 ? 'geradeaus' : m < 55 ? `leicht ${side}` : m < 115 ? side : `scharf ${side}`; }
+function analyzeJunctions(ways, pts, cum) {
+  const total = cum[cum.length - 1], byNode = new Map(), found = [];
+  ways.forEach((w, wi) => { if (!w.nodes || !w.geometry || w.nodes.length !== w.geometry.length) return; w.nodes.forEach((id, k) => { let l = byNode.get(id); if (!l) byNode.set(id, l = []); l.push([wi, k]); }); });
+  for (const occ of byNode.values()) {
+    let deg = 0;
+    for (const [wi, k] of occ) { const n = ways[wi].nodes.length; if (k > 0) deg++; if (k < n - 1) deg++; }
+    if (deg < 3) continue;
+    const g0 = ways[occ[0][0]].geometry[occ[0][1]], jp = [g0.lat, g0.lon];
+    const loc = locateOnRoute(pts, cum, jp, 0, Infinity);
+    if (loc.dist > 12 || loc.s < 20 || total - loc.s < 20) continue;
+    const br = [];
+    for (const [wi, k] of occ) {
+      const g = ways[wi].geometry, n = g.length;
+      for (const dir of [-1, 1]) {
+        if (k + dir < 0 || k + dir >= n) continue;
+        let q = null, acc = 0, prev = jp;
+        for (let m = k + dir; m >= 0 && m < n; m += dir) { const c = [g[m].lat, g[m].lon]; acc += hav(prev, c); prev = c; q = c; if (acc >= 12) break; }
+        if (q && hav(jp, q) > 2) br.push(brg(jp, q));
+      }
+    }
+    br.sort((a, b) => a - b);
+    const ded = [];
+    for (const b of br) if (!ded.length || Math.abs(relAng(ded[ded.length - 1], b)) > 12) ded.push(b);
+    if (ded.length > 1 && Math.abs(relAng(ded[0], ded[ded.length - 1])) <= 12) ded.pop();
+    if (ded.length < 3) continue;
+    const inB = brg(routePtAt(pts, cum, loc.s - 18), routePtAt(pts, cum, loc.s));
+    const outB = brg(routePtAt(pts, cum, loc.s), routePtAt(pts, cum, loc.s + 18));
+    const back = (inB + 180) % 360;
+    let bi = -1, bd = 999;
+    ded.forEach((b, i) => { const d = Math.abs(relAng(back, b)); if (d < bd) { bd = d; bi = i; } });
+    if (bd > 45) continue;
+    const fwd = ded.filter((_, i) => i !== bi);
+    let ci = -1, cd = 999;
+    fwd.forEach((b, i) => { const d = Math.abs(relAng(outB, b)); if (d < cd) { cd = d; ci = i; } });
+    if (cd > 40 || fwd.length < 2) continue;
+    const rel = fwd.map(b => relAng(inB, b));
+    const order = rel.map((a, i) => ({ a, i })).sort((x, y) => x.a - y.a);
+    found.push({ s: loc.s, inB, n: fwd.length, pos: order.findIndex(o => o.i === ci), a: rel[ci] });
+  }
+  found.sort((x, y) => x.s - y.s);
+  const res = [];
+  for (const j of found) { if (res.length && j.s - res[res.length - 1].s < 25) { if (j.n > res[res.length - 1].n) res[res.length - 1] = j; continue; } res.push(j); }
+  return res;
+}
+function junctionText(j, useDeg) {
+  const ord = ['ersten', 'zweiten', 'dritten', 'vierten', 'fünften', 'sechsten'];
+  let which;
+  if (j.n === 2) which = j.pos === 0 ? 'linken Weg' : 'rechten Weg';
+  else if (j.pos === 0) which = 'ganz linken Weg';
+  else if (j.pos === j.n - 1) which = 'ganz rechten Weg';
+  else which = `${ord[j.pos] || (j.pos + 1) + '.'} Weg von links`;
+  const dw = dirWord(j.a), kind = j.n === 2 ? 'Gabelung' : 'Kreuzung';
+  let t = `Gleich ${kind}: ${dw}, den ${which}.`;
+  if (useDeg) t += ` Du läufst Richtung ${compassDe(j.inB)}. ` + (Math.abs(j.a) >= 10 ? `Der Weg geht etwa ${Math.round(Math.abs(j.a) / 10) * 10} Grad nach ${j.a > 0 ? 'rechts' : 'links'} ab.` : 'Der Weg führt geradeaus weiter.');
+  return { detail: t, which, dw };
+}
+function mergeJunctions(instr, juncs, useDeg) {
+  const out = instr.slice();
+  for (const j of juncs) {
+    const t = junctionText(j, useDeg);
+    const f = out.find(i => Math.abs(i.s - j.s) < 40 && !i.detail);
+    if (f) { f.now = f.text; f.text = `${f.text}, ${t.which}`; f.detail = t.detail; continue; }
+    out.push({ s: j.s, text: `${t.dw}, ${t.which}`, now: t.dw, delta: j.a, detail: t.detail, straight: Math.abs(j.a) < 20, a1: false, a2: false, a3: false });
+  }
+  out.sort((x, y) => x.s - y.s);
+  return out;
 }
 //#PURE-END
 
@@ -640,12 +732,35 @@ async function routeVia(points) {
   throw lastErr || new Error('Kein Routing möglich');
 }
 
+const OVP = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+async function loadJunctions() {
+  const pts = S.pts, cum = S.cum;
+  if (!SET.detail || pts.length < 2 || S.juncFor === pts) return;
+  S.juncFor = pts;
+  const samp = []; let last = -1e9;
+  for (let i = 0; i < pts.length; i++) if (cum[i] - last >= 100 || i === pts.length - 1) { samp.push(pts[i]); last = cum[i]; }
+  const poly = samp.map(p => p[0].toFixed(5) + ',' + p[1].toFixed(5)).join(',');
+  const q = `[out:json][timeout:25];way["highway"~"^(path|track|footway|bridleway|cycleway|pedestrian|steps|unclassified|residential|living_street|tertiary|secondary|primary|road)$"]["access"!~"^(private|no)$"]["footway"!~"^(sidewalk|crossing)$"](around:30,${poly});out geom qt;`;
+  for (const url of OVP) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 28000);
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (S.pts !== pts) return;
+      const js = analyzeJunctions((j.elements || []).filter(e => e.type === 'way'), pts, cum);
+      S.instr = mergeJunctions(S.instr, js, SET.deg);
+      S.junc = js.length;
+      return;
+    } catch (e) { /* naechster Server */ } finally { clearTimeout(t); }
+  }
+}
 function setRoute(raw) {
   S.pts = densify(raw, 25);
   S.cum = cumulative(S.pts);
   S.instr = makeInstructions(S.pts, S.cum);
-  S.elev = null;
-  drawRoute(); updateStats();
+  S.elev = null; S.juncFor = null;
+  drawRoute(); updateStats(); loadJunctions();
   if (!nav.on) planElev();
 }
 function updateStats() {
@@ -945,6 +1060,7 @@ function finishRun() {
   if (nav.sim) clearInterval(nav.sim); nav.sim = null;
   try { nav.lock && nav.lock.release(); } catch (e) {} nav.lock = null; stopKeepAlive(); setDim(false);
   ttsStop();
+  if (!nav.rec && !nav.simMode) { toast('Navigation beendet, es wurde nichts aufgezeichnet.', 4000); endNav(); return; }
   run = { id: Date.now(), t: nav.t0, dist: nav.dist, sec: (Date.now() - nav.t0) / 1000, track: nav.track.slice(), sim: !!nav.simMode, rating: null, up: null, down: null, prof: null, start: S.start, wps: S.wps.slice(), end: S.end, mode: S.mode };
   $('fKm').textContent = (run.dist / 1000).toFixed(2); $('fTime').textContent = fmtTime(run.sec); $('fPace').textContent = fmtPace(run.sec, run.dist);
   $('fUp').textContent = '…'; $('fDown').textContent = '…'; $('fProf').innerHTML = ''; $('fNote').value = '';
@@ -1058,13 +1174,13 @@ $('btnMute').onclick = () => {
 };
 
 /* ---------- Einstellungen ---------- */
-const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true }, store.get('settings', {}));
+const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true, detail: true, deg: true }, store.get('settings', {}));
 function saveSet() { store.set('settings', SET); }
 (function bindSettings() {
   const num = (id, key, min, max) => { const e = $(id); e.value = SET[key]; e.onchange = () => { let v = parseFloat(String(e.value).replace(',', '.')); if (!(v >= min)) v = SET[key]; SET[key] = Math.min(max, v); e.value = SET[key]; saveSet(); }; };
   const chk = (id, key) => { const e = $(id); e.checked = !!SET[key]; e.onchange = () => { SET[key] = e.checked; saveSet(); }; };
   chk('setSafety', 'safety'); chk('setAutoTiles', 'autoTiles'); chk('setClearTiles', 'clearTiles');
-  num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
+  chk('setDetail', 'detail'); chk('setDeg', 'deg'); num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
   [1, 2, 3].forEach(i => { const e = $('ctc' + i); e.value = SET.contacts[i - 1] || ''; e.onchange = () => { SET.contacts[i - 1] = e.value.trim().replace(/[^\d+]/g, ''); e.value = SET.contacts[i - 1]; saveSet(); }; });
   const pin = $('setPin'); pin.value = SET.pin; pin.onchange = () => { SET.pin = pin.value.replace(/\D/g, '').slice(0, 8); pin.value = SET.pin; saveSet(); };
   const tk = $('setTileKm'); tk.value = String(SET.tileKm); tk.onchange = () => { SET.tileKm = +tk.value; saveSet(); };
@@ -1370,6 +1486,15 @@ function safetyTick() {
   flushOutbox();
 }
 
+/* ---------- Dialog ---------- */
+function askChoice(title, text, buttons) {
+  return new Promise(res => {
+    $('dlgT').textContent = title; $('dlgS').textContent = text; const b = $('dlgB'); b.textContent = '';
+    buttons.forEach((label, i) => { const x = document.createElement('button'); x.type = 'button'; x.className = 'btn' + (i === 0 ? ' go' : ''); x.textContent = label; x.onclick = () => { $('dlg').hidden = true; res(i); }; b.appendChild(x); });
+    $('dlg').hidden = false;
+  });
+}
+
 /* ---------- Navigation ---------- */
 const nav = {
   on: false, watch: null, sim: null, progress: 0, base: 0, off: 0, wasOff: false, lastReroute: 0, rerouting: false,
@@ -1387,13 +1512,17 @@ function roundM(d) { return d < 100 ? Math.max(10, Math.round(d / 10) * 10) : Ma
 
 async function startNav() {
   if (S.pts.length < 2) return;
+  nav.rec = true;
+  if (!nav.simMode) { const a = await askChoice('Tracking mitlaufen lassen?', 'Das Tracking zeichnet deinen echten GPS-Verlauf, Strecke und Zeit auf, auch wenn du die Route änderst.', ['Ja, Tracking starten', 'Nein, nur navigieren']); nav.rec = a === 0; }
+  nav.guide = true; ['btnRejoin', 'btnAuto', 'btnHome'].forEach(id => { $(id).hidden = false; });
+  if (S.juncFor !== S.pts) loadJunctions();
   nav.on = true; nav.progress = 0; nav.base = 0; nav.off = 0; nav.wasOff = false; nav.lastKm = 0; nav.t0 = Date.now(); nav.follow = true;
   nav.track = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
   nav.rem = S.wps.map(w => [w[0], w[1]]); nav.goal = (S.mode === 'p2p' && S.end) ? S.end : S.start; nav.auto = true; nav.offSince = 0; nav.retries = 0; nav.heading = null; nav.hBuf = []; nav.held = false;
   nav.orig = { pts: S.pts, cum: S.cum, instr: S.instr }; $('btnAuto').textContent = 'Neuplanung: automatisch';
   nav.air = null; hideAsk(); startSafety();
   if (SET.autoTiles && !nav.simMode) saveTiles(routeSet(), true);
-  S.instr.forEach(i => { i.a1 = false; i.a2 = false; });
+  S.instr.forEach(i => { i.a1 = false; i.a2 = false; i.a3 = false; i.wrong = false; });
   $('panel').hidden = true; $('nav').hidden = false; $('recenter').hidden = true; $('banner').classList.remove('off');
   map.closePopup(); map.dragging.enable();
   reqLock(); startKeepAlive();
@@ -1442,7 +1571,21 @@ function endNav() {
   fit();
 }
 $('btnNav').onclick = () => { nav.simMode = false; startNav(); };
-$('btnStop').onclick = () => { if (sos.alarm || sos.emerg) { toast('Ein Alarm ist aktiv. Beende ihn zuerst.', 4000); return; } finishRun(); };
+$('btnStop').onclick = async () => {
+  if (sos.alarm || sos.emerg) { toast('Ein Alarm ist aktiv. Beende ihn zuerst.', 4000); return; }
+  if (nav.guide && nav.rec && !nav.simMode) {
+    const a = await askChoice('Navigation beenden', 'Soll das Tracking weiterlaufen?', ['Tracking läuft weiter', 'Alles beenden und speichern', 'Zurück']);
+    if (a === 2) return;
+    if (a === 0) { stopGuide(); return; }
+  }
+  finishRun();
+};
+function stopGuide() {
+  nav.guide = false; nav.planSec = 1e9; nav.rerouting = false; nav.air = null; hideAsk(); setOff(false);
+  ['btnRejoin', 'btnAuto', 'btnHome'].forEach(id => { $(id).hidden = true; });
+  say('Navigation beendet. Das Tracking läuft weiter.', true);
+  if (nav.lastPos) updateNav(nav.lastPos.p, false);
+}
 $('recenter').onclick = () => { nav.follow = true; $('recenter').hidden = true; if (nav.me) map.setView(nav.me.getLatLng(), Math.max(map.getZoom(), 17)); };
 map.on('dragstart', () => { if (nav.on) { nav.follow = false; $('recenter').hidden = false; } });
 
@@ -1460,6 +1603,7 @@ function onPos(p, acc) {
     nav.hBuf.push(p); if (nav.hBuf.length > 8) nav.hBuf.shift();
     if (hav(nav.hBuf[0], p) >= 15) nav.heading = brg(nav.hBuf[0], p); } }
   nav.rem = nav.rem.filter(w => hav(w, p) > 40);
+  if (!nav.guide) { updateNav(p, false); return; }
 
   const loc = locate_(p);
   const thresh = Math.max(45, Math.min((acc || 0) * 1.5, 90));
@@ -1468,6 +1612,13 @@ function onPos(p, acc) {
     updateNav(p, true); updateAir(p);
     if (!nav.rerouting && Date.now() - nav.lastReroute > 30000) reroute(p, 'smart');
     return;
+  }
+  if (!nav.air && !nav.wasOff && loc.dist > Math.max(12, (acc || 0) * 1.2) && loc.dist <= thresh && nav.heading != null) {
+    const j = S.instr.find(i => Math.abs(loc.s - i.s) < 30 && !i.wrong);
+    if (j) {
+      const rb = brg(pointAt(Math.max(0, loc.s - 8)), pointAt(Math.min(S.cum[S.cum.length - 1], loc.s + 8)));
+      if (Math.abs(relAng(rb, nav.heading)) > 35) { j.wrong = true; say('Achtung, das ist wahrscheinlich der falsche Weg. Prüfe die Abzweigung.', true); }
+    }
   }
   if (loc.dist > thresh) {
     if (!nav.offSince) nav.offSince = Date.now();
@@ -1483,7 +1634,7 @@ function onPos(p, acc) {
   if (nav.wasOff && !nav.rerouting) { nav.wasOff = false; setOff(false); say('Du bist wieder auf der Route.'); }
   nav.progress = Math.max(nav.progress - 30, loc.s);
   const covered = nav.base + nav.progress;
-  const kmDone = Math.floor(covered / 1000);
+  const kmDone = Math.floor(nav.dist / 1000);
   if (kmDone > nav.lastKm) {
     nav.lastKm = kmDone;
     const rest = (total - nav.progress) / 1000;
@@ -1493,11 +1644,13 @@ function onPos(p, acc) {
   const nxt = S.instr.find(i => i.s > nav.progress - 8);
   if (nxt) {
     const d = nxt.s - nav.progress;
-    if (d <= 180 && !nxt.a1 && !nxt.a2) { nxt.a1 = true; say(`In ${roundM(d)} Metern ${nxt.text}.`); }
-    if (d <= 35 && !nxt.a2) { nxt.a2 = true; nxt.a1 = true; say(`Jetzt ${nxt.text}.`, true); }
+    const det = SET.detail !== false && nxt.detail;
+    if (d <= 180 && !nxt.a1 && !nxt.a2 && !nxt.a3 && !nxt.straight) { nxt.a1 = true; say(`In ${roundM(d)} Metern ${nxt.text}.`); }
+    if (det && d <= 60 && !nxt.a3 && !nxt.a2) { nxt.a3 = true; nxt.a1 = true; say(nxt.detail, true); }
+    if (d <= 22 && !nxt.a2) { nxt.a2 = true; nxt.a1 = true; if (!nxt.straight) say(`Jetzt ${nxt.now || nxt.text}.`, true); }
   }
   if (total - nav.progress < 25 && covered > Math.min(300, total * .5)) {
-    say(`Ziel erreicht. Gut gemacht! ${(covered / 1000).toFixed(1).replace('.', ',')} Kilometer in ${fmtTime((Date.now() - nav.t0) / 1000)}.`, true);
+    say(`Ziel erreicht. Gut gemacht! ${(nav.dist / 1000).toFixed(1).replace('.', ',')} Kilometer in ${fmtTime((Date.now() - nav.t0) / 1000)}.`, true);
     nav.arrived = true;
     setTimeout(finishRun, 4500); return;
   }
@@ -1514,7 +1667,8 @@ function updateNav(p, off) {
   const total = S.cum[S.cum.length - 1], rest = Math.max(0, total - nav.progress);
   $('nRest').textContent = (rest / 1000).toFixed(1);
   $('nTime').textContent = fmtTime(rest / 1000 * S.pace * 60);
-  $('nDone').textContent = ((nav.base + nav.progress) / 1000).toFixed(1);
+  $('nDone').textContent = (nav.dist / 1000).toFixed(1);
+  if (!nav.guide) { $('nRest').textContent = '–'; $('nTime').textContent = fmtTime((Date.now() - nav.t0) / 1000); $('nDist').textContent = '●'; $('nWhat').textContent = 'Tracking läuft, keine Navigation'; $('nBar').style.width = '0%'; setArrow(0); return; }
   $('nBar').style.width = Math.min(100, (nav.base + nav.progress) / (nav.base + total) * 100) + '%';
   if (off) { $('nDist').textContent = '!'; $('nWhat').textContent = nav.rerouting ? 'Neue Route wird berechnet…' : (nav.auto ? 'Abseits der Route' : 'Eigener Weg, Neuplanung aus'); setArrow(0); return; }
   const nxt = S.instr.find(i => i.s > nav.progress - 8);
@@ -1549,7 +1703,7 @@ async function reroute(p, mode) {
       }
     }
     nav.base += nav.progress;
-    S.pts = densify(leg, 25); S.cum = cumulative(S.pts); S.instr = makeInstructions(S.pts, S.cum);
+    S.pts = densify(leg, 25); S.cum = cumulative(S.pts); S.instr = makeInstructions(S.pts, S.cum); S.juncFor = null; loadJunctions();
     nav.progress = 0; nav.offSince = 0; nav.retries = 0; nav.wasOff = false; nav.held = false;
     if (nav.air) exitAir();
     drawRoute(); setOff(false);
