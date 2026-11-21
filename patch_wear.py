@@ -519,12 +519,12 @@ public class WearMainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(dp(26), dp(26), dp(26), dp(30));
+        root.setPadding(dp(26), dp(52), dp(26), dp(40));
         arrow = new ArrowView(this);
-        arrow.setLayoutParams(new LinearLayout.LayoutParams(dp(64), dp(64)));
-        infoView = tv(16, Color.WHITE, true);
-        bpmView = tv(52, Color.WHITE, true);
-        statsView = tv(14, Color.LTGRAY, false);
+        arrow.setLayoutParams(new LinearLayout.LayoutParams(dp(60), dp(60)));
+        infoView = tv(15, Color.WHITE, true);
+        bpmView = tv(48, Color.WHITE, true);
+        statsView = tv(13, Color.LTGRAY, false);
         statusView = tv(10, Color.GRAY, false);
         btn = new Button(this);
         btn.setTextSize(13);

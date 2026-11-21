@@ -138,6 +138,11 @@ body[data-mode="p2p"] .p2p-only{display:block}
 #navbar.folded > .row{display:none}
 #hrChip{position:absolute;pointer-events:none;left:max(12px,env(safe-area-inset-left,0px));top:120px;background:rgba(20,20,24,.82);color:#fff;border-radius:18px;padding:6px 12px;font-size:18px;font-weight:700;z-index:5}
 #hrChip.stale{opacity:.5}
+#mapTools{position:absolute;z-index:450;right:max(10px,env(safe-area-inset-right,0px));top:calc(max(10px,env(safe-area-inset-top,0px)) + 116px);display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.mt{min-width:64px;min-height:48px;padding:6px 10px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font:600 12px/1.15 var(--font-ui);text-align:center}
+.mt b{display:block;font-size:15px;font-weight:700}
+.mt.on{border-color:var(--blaze);box-shadow:0 0 0 2px var(--blaze),var(--shadow)}
+.cone{width:140px;height:140px;pointer-events:none}
 #hrChip.z0{color:#fff}#hrChip.z1{color:#ff9800}#hrChip.z2{color:#3ddc84}#hrChip.z3{color:#ff3b30}
 .ctcs{display:grid;gap:8px;margin-top:10px}
 .setgrid{display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;margin-top:10px}
@@ -155,6 +160,11 @@ body[data-mode="p2p"] .p2p-only{display:block}
 </head>
 <body>
 <div id="map" aria-label="Karte"></div>
+<div id="mapTools">
+  <button class="mt" id="btnMapSw" type="button" aria-label="Kartenansicht wechseln">Karte<b id="mapSwTxt">Straße</b></button>
+  <button class="mt" id="btnTrails" type="button" aria-pressed="false" aria-label="Wanderwege ein oder aus">Wanderwege<b id="trailTxt">aus</b></button>
+  <button class="mt" id="btnCompass" type="button" aria-pressed="false" aria-label="Kompass und Blickrichtung">Kompass<b id="compTxt">aus</b></button>
+</div>
 
 <aside id="panel">
   <div class="grab">
@@ -202,6 +212,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
               <b id="dirTxt">Zufällige Richtung</b>
               <span class="hint">Zum Einstellen den Pfeil ziehen oder tippen. Der Kurs führt zuerst in diese Richtung.</span>
               <button class="btn" id="btnDirAuto" type="button">Zufall</button>
+              <button class="btn" id="btnDirLook" type="button">In Blickrichtung planen</button>
             </div>
           </div>
         </div>
@@ -944,6 +955,81 @@ function setDir(a) {
   $('btnDirAuto').onclick = () => setDir(null);
 })();
 
+/* ---------- Kartenwechsel und Kompass (Planung) ---------- */
+const BASES = [['osm', 'Straße'], ['topo', 'Topo'], ['sat', 'Satellit']];
+function syncTools() {
+  const v = $('baseSel').value, b = BASES.find(x => x[0] === v) || BASES[0];
+  $('mapSwTxt').textContent = b[1];
+  const on = $('trailChk').checked;
+  $('trailTxt').textContent = on ? 'an' : 'aus'; $('btnTrails').classList.toggle('on', on); $('btnTrails').setAttribute('aria-pressed', String(on));
+}
+$('btnMapSw').onclick = () => {
+  const i = BASES.findIndex(x => x[0] === $('baseSel').value);
+  $('baseSel').value = BASES[(i + 1) % BASES.length][0]; $('baseSel').onchange({ target: $('baseSel') });
+};
+$('btnTrails').onclick = () => { $('trailChk').checked = !$('trailChk').checked; $('trailChk').onchange({ target: $('trailChk') }); };
+const bsel = $('baseSel').onchange; $('baseSel').onchange = e => { bsel(e); syncTools(); };
+const tchk = $('trailChk').onchange; $('trailChk').onchange = e => { tchk(e); syncTools(); };
+syncTools();
+
+const look = { on: false, h: null, sx: 0, sy: 0, mk: null, t: 0, pos: null };
+function headingFromEvent(e) {
+  if (typeof e.webkitCompassHeading === 'number') return e.webkitCompassHeading;
+  if (e.alpha == null) return null;
+  const beta = e.beta || 0, gamma = e.gamma || 0;
+  if (Math.abs(beta) < 40) return (360 - e.alpha) % 360;           // Handy liegt flach: Oberkante zeigt
+  const x = rad(beta), y = rad(gamma), z = rad(e.alpha);           // Handy aufrecht: Rueckseite zeigt
+  const cY = Math.cos(y), cZ = Math.cos(z), sX = Math.sin(x), sY = Math.sin(y), sZ = Math.sin(z);
+  const vx = -cZ * sY - sZ * sX * cY, vy = -sZ * sY + cZ * sX * cY;
+  let h = Math.atan(vx / vy);
+  if (vy < 0) h += Math.PI; else if (vx < 0) h += 2 * Math.PI;
+  return deg(h);
+}
+function onOrient(e) {
+  if (e.type === 'deviceorientation' && e.absolute === false) return;
+  const h = headingFromEvent(e); if (h == null || isNaN(h)) return;
+  look.sx += (Math.sin(rad(h)) - look.sx) * .25; look.sy += (Math.cos(rad(h)) - look.sy) * .25;
+  if (look.h == null) { look.sx = Math.sin(rad(h)); look.sy = Math.cos(rad(h)); }
+  look.h = (deg(Math.atan2(look.sx, look.sy)) + 360) % 360;
+  const now = Date.now(); if (now - look.t < 120) return; look.t = now;
+  drawCone();
+}
+function conePos() { return S.start || look.pos || [map.getCenter().lat, map.getCenter().lng]; }
+function drawCone() {
+  if (!look.on || look.h == null) return;
+  const p = conePos();
+  const html = `<svg class="cone" viewBox="-70 -70 140 140" style="transform:rotate(${look.h.toFixed(0)}deg)"><defs><radialGradient id="cg" cx="0" cy="0" r="68" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1a73e8" stop-opacity=".55"/><stop offset="1" stop-color="#1a73e8" stop-opacity="0"/></radialGradient></defs><path d="M0 0 L-30 -62 A68 68 0 0 1 30 -62 Z" fill="url(#cg)"/></svg>`;
+  const ic = L.divIcon({ className: '', html, iconSize: [140, 140], iconAnchor: [70, 70] });
+  if (!look.mk) look.mk = L.marker(p, { icon: ic, interactive: false, keyboard: false, zIndexOffset: -100 }).addTo(map);
+  else { look.mk.setLatLng(p); look.mk.setIcon(ic); }
+  $('compTxt').textContent = `${Math.round(look.h)}° ${COMPASS[Math.round(look.h / 45) % 8].replace('Norden', 'N').replace('Süd', 'S').replace('Ost', 'O').replace('West', 'W')}`;
+}
+async function lookStart() {
+  if (look.on) return true;
+  try { if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted') throw 0; } } catch (e) { toast('Kompass nicht erlaubt.'); return false; }
+  look.on = true; look.h = null;
+  window.addEventListener('deviceorientationabsolute', onOrient, true);
+  window.addEventListener('deviceorientation', onOrient, true);
+  $('btnCompass').classList.add('on'); $('btnCompass').setAttribute('aria-pressed', 'true'); $('compTxt').textContent = '…';
+  try { navigator.geolocation.getCurrentPosition(p => { look.pos = [p.coords.latitude, p.coords.longitude]; drawCone(); }, () => {}, { maximumAge: 30000, timeout: 8000 }); } catch (e) {}
+  toast('Kompass an. Zum Eichen das Handy in einer Acht schwenken.', 4500);
+  return true;
+}
+function lookStop() {
+  look.on = false; look.h = null;
+  window.removeEventListener('deviceorientationabsolute', onOrient, true);
+  window.removeEventListener('deviceorientation', onOrient, true);
+  if (look.mk) { map.removeLayer(look.mk); look.mk = null; }
+  $('btnCompass').classList.remove('on'); $('btnCompass').setAttribute('aria-pressed', 'false'); $('compTxt').textContent = 'aus';
+}
+$('btnCompass').onclick = () => { look.on ? lookStop() : lookStart(); };
+$('btnDirLook').onclick = async () => {
+  if (!(await lookStart())) return;
+  for (let i = 0; i < 20 && look.h == null; i++) await new Promise(r => setTimeout(r, 100));
+  if (look.h == null) { toast('Kein Kompass-Signal. Prüfe, ob das Handy einen Kompass hat.', 4500); return; }
+  setDir(look.h); toast(`Richtung ${DIRN[Math.round(look.h / 45) % 8]} (${Math.round(look.h)}°) übernommen.`, 3500);
+};
+
 /* ---------- Höhen ---------- */
 function sampleRoute(pts, cum, maxN = 300, minStep = 60) {
   const total = cum[cum.length - 1], n = Math.max(2, Math.min(maxN, Math.ceil(total / minStep) + 1));
@@ -1607,6 +1693,7 @@ async function startNav() {
   if (!nav.simMode) { const a = await askChoice('Tracking mitlaufen lassen?', 'Das Tracking zeichnet deinen echten GPS-Verlauf, Strecke und Zeit auf, auch wenn du die Route änderst.', ['Ja, Tracking starten', 'Nein, nur navigieren']); nav.rec = a === 0; }
   nav.guide = true; ['btnRejoin', 'btnAuto', 'btnHome'].forEach(id => { $(id).hidden = false; });
   if (S.juncFor !== S.pts) loadJunctions();
+  lookStop(); $('mapTools').hidden = true;
   nav.on = true; nav.progress = 0; nav.base = 0; nav.off = 0; nav.wasOff = false; nav.lastKm = 0; nav.t0 = Date.now(); nav.follow = true;
   nav.track = []; nav.tt = []; nav.th = []; nav.dist = 0; nav.lastFix = null; nav.fin = false; nav.arrived = false; histLayer.clearLayers();
   nav.rem = S.wps.map(w => [w[0], w[1]]); nav.goal = (S.mode === 'p2p' && S.end) ? S.end : S.start; nav.auto = true; nav.offSince = 0; nav.retries = 0; nav.heading = null; nav.hBuf = []; nav.held = false;
@@ -1647,6 +1734,7 @@ function stopTracking() {
   if (BG && nav.bgId != null) { try { BG.removeWatcher({ id: nav.bgId }); } catch (e) {} nav.bgId = null; }
 }
 function endNav() {
+  $('mapTools').hidden = false;
   nav.on = false; clearInterval(nav.wTick); pushWatch(true);
   stopSafety(); hideAsk(); nav.air = null;
   if (SET.clearTiles) clearTiles();
@@ -1833,7 +1921,7 @@ $('search').onkeydown = e => { if (e.key === 'Enter') $('btnSearch').click(); };
   if (NATIVE) { $('btnDim').hidden = true; $('btnPinInfo').hidden = true; }
   const pl = store.get('plan', null);
   const b = store.get('base', 'osm'); $('baseSel').value = b; $('baseSel').onchange({ target: $('baseSel') });
-  if (store.get('trail', false)) { $('trailChk').checked = true; trails.addTo(map); }
+  if (store.get('trail', false)) { $('trailChk').checked = true; trails.addTo(map); } syncTools();
   if (pl) { S.pace = pl.pace || 6; S.provider = pl.provider || 'brt'; $('provSel').value = S.provider; }
   $('paceSel').value = S.pace;
   setKm(pl && pl.km ? pl.km : 5);
