@@ -250,6 +250,9 @@ body[data-mode="p2p"] .p2p-only{display:block}
       <label class="field"><span class="lbl" style="margin:0">Kartenstil</span>
         <select id="baseSel"><option value="osm">Standard</option><option value="topo">Topo (Wanderwege, Höhenlinien)</option><option value="sat">Satellit</option></select></label>
       <label class="row" style="margin-top:10px;gap:10px"><input type="checkbox" id="trailChk"> Markierte Wanderwege einblenden</label>
+      <div class="setgrid">
+        <label for="setSpur">Abstecher kürzer als (m) beim Erstellen entfernen, 0 = aus</label><input type="text" id="setSpur" inputmode="numeric">
+      </div>
       <div class="lbl" style="margin-top:14px">Offline-Karte</div>
       <label class="row" style="gap:10px"><input type="checkbox" id="setAutoTiles"> Karte beim Start der Navigation speichern</label>
       <label class="row" style="gap:10px;margin-top:6px"><input type="checkbox" id="setClearTiles"> Gespeicherte Karte nach dem Lauf löschen</label>
@@ -323,7 +326,7 @@ body[data-mode="p2p"] .p2p-only{display:block}
 
 <div id="nav" hidden>
   <div id="banner" role="status" aria-live="polite">
-    <svg id="arrow" viewBox="0 0 48 48" aria-hidden="true"><g id="arrowG" transform-origin="24 24"><path d="M24 4 L38 22 H29 V44 H19 V22 H10 Z" fill="currentColor"/></g></svg>
+    <svg id="arrow" viewBox="0 0 48 48" aria-hidden="true"><g id="arrowG"><path d="M24 4 L38 22 H29 V44 H19 V22 H10 Z" fill="currentColor"/></g></svg>
     <div><div class="dist" id="nDist">–</div><div class="what" id="nWhat">Start…</div></div>
   </div>
   <div id="hrChip" hidden aria-live="off">♥ --</div>
@@ -596,6 +599,31 @@ function mergeJunctions(instr, juncs, useDeg) {
   out.sort((x, y) => x.s - y.s);
   return out;
 }
+// Kurze Sackgassen-Abstecher (hin und zurück auf demselben Weg) aus einer Route entfernen
+function removeSpurs(raw, maxOne) {
+  if (!maxOne || raw.length < 4) return { pts: raw, cut: 0 };
+  const P = densify(raw, 10), C = cumulative(P), out = [];
+  let i = 0, cut = 0;
+  while (i < P.length) {
+    out.push(P[i]);
+    let jBest = -1;
+    for (let j = i + 3; j < P.length && C[j] - C[i] <= 2 * maxOne + 30; j++) if (C[j] - C[i] >= 20 && hav(P[i], P[j]) < 12) jBest = j;
+    if (jBest > 0 && !(i > 0 && jBest + 1 < P.length && hav(P[i - 1], P[jBest + 1]) < 12)) {
+      let far = 0, mid = i;
+      for (let k = i; k <= jBest; k++) { const d = hav(P[i], P[k]); if (d > far) { far = d; mid = k; } }
+      if (far >= 15 && far <= maxOne + 10) {
+        let near = 0, tot = 0;
+        for (let k = i; k <= mid; k++) {
+          let m = 1e9; for (let q = mid; q <= jBest; q++) { const d = hav(P[k], P[q]); if (d < m) m = d; }
+          tot++; if (m <= 12) near++;
+        }
+        if (near / tot >= .85) { i = jBest; continue; }
+      }
+    }
+    i++;
+  }
+  return { pts: out, cut: C[C.length - 1] - cumulative(out).pop() };
+}
 //#PURE-END
 
 /* ---------- Native App (Capacitor) ---------- */
@@ -816,7 +844,7 @@ async function generate(newBearing) {
   try {
     for (let it = 0; it < 5; it++) {
       const w = ringWaypoints(S.start, D, k, S.bearing);
-      const raw = await routeVia([S.start, ...w, S.start]);
+      const raw = removeSpurs(await routeVia([S.start, ...w, S.start]), SET.spurM).pts;
       if (token !== S.token) return;
       const L_ = cumulative(raw).pop();
       const err = Math.abs(L_ - D) / D;
@@ -1324,13 +1352,13 @@ $('btnMute').onclick = () => {
 };
 
 /* ---------- Einstellungen ---------- */
-const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true, detail: true, deg: true, zLow: 100, zOpt: 130, zHigh: 160, zoneSay: true, hrInt: 5 }, store.get('settings', {}));
+const SET = Object.assign({ safety: false, contacts: ['', '', ''], pin: '', stillMin: 5, overMin: 10, cdSec: 30, silentSec: 20, repeatMin: 5, autoTiles: true, tileKm: 1.5, clearTiles: true, detail: true, deg: true, zLow: 100, zOpt: 130, zHigh: 160, zoneSay: true, hrInt: 5, spurM: 100 }, store.get('settings', {}));
 function saveSet() { store.set('settings', SET); }
 (function bindSettings() {
   const num = (id, key, min, max) => { const e = $(id); e.value = SET[key]; e.onchange = () => { let v = parseFloat(String(e.value).replace(',', '.')); if (!(v >= min)) v = SET[key]; SET[key] = Math.min(max, v); e.value = SET[key]; saveSet(); }; };
   const chk = (id, key) => { const e = $(id); e.checked = !!SET[key]; e.onchange = () => { SET[key] = e.checked; saveSet(); }; };
   chk('setSafety', 'safety'); chk('setAutoTiles', 'autoTiles'); chk('setClearTiles', 'clearTiles');
-  chk('setDetail', 'detail'); chk('setZoneSay', 'zoneSay'); num('setZLow', 'zLow', 40, 220); num('setZOpt', 'zOpt', 40, 230); num('setZHigh', 'zHigh', 40, 240); num('setHrInt', 'hrInt', 1, 30); chk('setDeg', 'deg'); num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
+  chk('setDetail', 'detail'); chk('setZoneSay', 'zoneSay'); num('setZLow', 'zLow', 40, 220); num('setZOpt', 'zOpt', 40, 230); num('setZHigh', 'zHigh', 40, 240); num('setHrInt', 'hrInt', 1, 30); num('setSpur', 'spurM', 0, 500); chk('setDeg', 'deg'); num('setStill', 'stillMin', 1, 60); num('setOver', 'overMin', 1, 180); num('setCd', 'cdSec', 10, 120); num('setSilent', 'silentSec', 5, 120); num('setRepeat', 'repeatMin', 1, 60);
   [1, 2, 3].forEach(i => { const e = $('ctc' + i); e.value = SET.contacts[i - 1] || ''; e.onchange = () => { SET.contacts[i - 1] = e.value.trim().replace(/[^\d+]/g, ''); e.value = SET.contacts[i - 1]; saveSet(); }; });
   const pin = $('setPin'); pin.value = SET.pin; pin.onchange = () => { SET.pin = pin.value.replace(/\D/g, '').slice(0, 8); pin.value = SET.pin; saveSet(); };
   const tk = $('setTileKm'); tk.value = String(SET.tileKm); tk.onchange = () => { SET.tileKm = +tk.value; saveSet(); };
